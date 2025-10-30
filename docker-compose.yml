@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  patients-api:
+    build: ./patients-api
+    container_name: patients-api
+    environment:
+      - PORT=4001
+      - SERVICE_NAME=patients-api
+      - PATIENTS_DATABASE_URL=${PATIENTS_DATABASE_URL}
+    ports:
+      - "4001:4001"
+    restart: unless-stopped
+
+  appointments-api:
+    build: ./appointments-api
+    container_name: appointments-api
+    environment:
+      - PORT=4002
+      - SERVICE_NAME=appointments-api
+      - APPOINTMENTS_DATABASE_URL=${APPOINTMENTS_DATABASE_URL}
+    ports:
+      - "4002:4002"
+    restart: unless-stopped
+
+  doctors-api:
+    build: ./doctors-api
+    container_name: doctors-api
+    environment:
+      - PORT=4004
+      - SERVICE_NAME=doctors-api
+      - DOCTORS_DATABASE_URL=${DOCTORS_DATABASE_URL}
+    ports:
+      - "4004:4004"
+    restart: unless-stopped
+
+  pharmacy-api:
+    build: ./pharmacy-api
+    container_name: pharmacy-api
+    environment:
+      - PORT=4003
+      - SERVICE_NAME=pharmacy-api
+      # Compose resuelve por nombre de servicio: http://users-api:4001
+      # - PATIENTS_API_URL=http://patients-api:4001
+      # - APPOINTMENTS_API_URL=http://appointments-api:4002
+      # - DOCTORS_API_URL=http://doctors-api:4004
+      - PHARMACY_MONGO_URI=${PHARMACY_MONGO_URI}
+    ports:
+      - "4003:4003"
+    # depends_on:
+      # - patients-api
+      # - appointments-api
+      # - doctors-api
+    restart: unless-stopped
+    

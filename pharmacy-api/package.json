@@ -1,0 +1,13 @@
+{
+  "name": "products-api",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {"start": "node src/app.js"},
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^3.3.2",
+    "mongoose": "^8.6.0"
+  }
+}
