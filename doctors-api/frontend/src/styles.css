@@ -80,7 +80,7 @@ header h1 {
 main {
     flex: 1;
     /* max-width: 1040px; */
-    max-width: 80vw;
+    width: 80vw;
     margin: 28px auto;
     padding: 0 16px;
     display: grid;
