@@ -5,7 +5,8 @@ COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
 RUN npm ci || npm install
 COPY . .
 # VITE_API_BASE can be overridden at build time
-ARG VITE_API_BASE=http://localhost:4003
+# ARG VITE_API_BASE=http://localhost:4003
+ARG VITE_API_BASE
 ENV VITE_API_BASE=$VITE_API_BASE
 RUN npm run build
 
