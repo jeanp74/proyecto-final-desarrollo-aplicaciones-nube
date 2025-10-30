@@ -1,7 +1,8 @@
-const STORAGE_KEY = 'users_react_api_base';
+const STORAGE_KEY = 'patients_api_base';
 
 export function getApiBase() {
-  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_API_BASE || 'https://users-api-cloud-e5gsc8ecdsaxh2g9.chilecentral-01.azurewebsites.net/';
+  // Por defecto, mismo origen (el propio contenedor sirve front+API)
+  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_API_BASE || '/';
 }
 
 export function setApiBase(v) {

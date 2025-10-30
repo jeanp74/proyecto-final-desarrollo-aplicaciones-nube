@@ -3,6 +3,7 @@ import cors from "cors";
 import { pool } from "./db.js";
 import path from "path";
 import { fileURLToPath } from "url";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -10,222 +11,158 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// app.use(express.static(__dirname));
-
 const PORT = process.env.PORT || 4001;
+const SERVICE = process.env.SERVICE_NAME || "patients-api";
 
-// app.get("/", async (_req, res) => {
-//   res.sendFile(path.join(__dirname, "index.html"));
-// });
+// ======== ENDPOINTS DEL API DE PACIENTES ========
 
-const publicDir = path.join(__dirname, "../public");
-app.use(express.static(publicDir));
+// Salud del servicio
+app.get("/health", (_req, res) => res.json({ status: "ok", service: SERVICE }));
 
-// Listado de métodos y rutas
-app.get("/api", async (_req, res) => {
-  // res.json({
-  //   metodos: {
-  //     GET: [
-  //       {url: "/db/health", hace: "Health DB"},
-  //       {url: "/users", hace: "Listar (SELECT real)"},
-  //       {url: "/users/:id", hace: "Obtener usuarios por id"},
-  //       {url: "/tables", hace: "Listar tablas de base de datos"},
-  //       {url: "/health", hace: "Mantén /health si ya lo tenías"}
-  //     ],
-  //     POST: [
-  //       {url: "/users", hace: "Crear usuario (name & email son obligatorios)"}
-  //     ],
-  //     PUT: [
-  //       {url: "/users/:id", hace: "Actualizar usuario (name & email son obligatorios)"},
-  //       {url: "/tables", hace: "Reiniciar tabla"}
-  //     ],
-  //     DELETE: [
-  //       {url: "/users/:id", hace: "Eliminar usuarios por id"}
-  //     ]
-  //   }
-  // });
-
-  res.json({
-    metodos: {
-      GET: {
-        "/db/health": "Health DB*",
-        "/users": "Listar (SELECT real)",
-        "/users/:id": "Obtener usuarios por id",
-        "/tables": "Listar tablas de base de datos",
-        "/health": "Mantén /health si ya lo tenías"
-      },
-      POST: {
-        "/users": "Crear usuario (name & email son obligatorios)"
-      },
-      PUT: {
-        "/users/:id": "Actualizar usuario (name & email son obligatorios)",
-        "/tables": "Reiniciar tabla"
-      },
-      DELETE: {
-        "/users/:id": "Eliminar usuarios por id"
-      }
-    }
-  });
-
-});
-
-
-// Health DB
+// Salud de la BD
 app.get("/db/health", async (_req, res) => {
   try {
     const r = await pool.query("SELECT 1 AS ok");
-    res.json({ ok: r.rows[0].ok === 1 });
+    res.json({ ok: r.rows[0]?.ok === 1 });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Listar (SELECT real)
-app.get("/users", async (_req, res) => {
+// Documentación simple
+app.get("/api", (_req, res) => {
+  res.json({
+    GET: {
+      "/patients": "Listar pacientes",
+      "/patients/:id": "Ver paciente por id",
+      "/db/health": "Salud de la base de datos",
+      "/health": "Salud del servicio"
+    },
+    POST: { "/patients": "Crear paciente" },
+    PUT: { "/patients/:id": "Actualizar paciente" },
+    DELETE: { "/patients/:id": "Eliminar paciente" }
+  });
+});
+
+// Listar pacientes
+app.get("/patients", async (_req, res) => {
   try {
-    const r = await pool.query("SELECT id, name, email FROM users_schema.users ORDER BY id ASC");
-    res.status(200).json(r.rows);
+    const q = `
+      SELECT id, nombres, apellidos, documento, correo, telefono, fecha_nacimiento, genero
+      FROM patients_schema.pacientes
+      ORDER BY id ASC
+    `;
+    const r = await pool.query(q);
+    res.json(r.rows);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error listando pacientes", detail: String(e) });
   }
 });
 
-// Obtener usuarios por id
-app.get("/users/:id", async (req, res) => {
+// Obtener 1 paciente
+app.get("/patients/:id", async (req, res) => {
   try {
-    const r = await pool.query(
-      "SELECT id, name, email FROM users_schema.users WHERE id=$1",
-      [req.params.id]
-    );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
-    }
+    const q = `
+      SELECT id, nombres, apellidos, documento, correo, telefono, fecha_nacimiento, genero
+      FROM patients_schema.pacientes
+      WHERE id = $1
+    `;
+    const r = await pool.query(q, [Number(req.params.id)]);
+    if (r.rowCount === 0) return res.status(404).json({ error: "Paciente no encontrado" });
+    res.json(r.rows[0]);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error consultando paciente", detail: String(e) });
   }
 });
 
+// Crear paciente
+app.post("/patients", async (req, res) => {
+  const {
+    nombres, apellidos, documento, correo,
+    telefono = null, fecha_nacimiento = null, genero = null
+  } = req.body ?? {};
 
-// Listar tablas de base de datos
-app.get("/tables", async (_req, res) => {
-  try {
-    const r = await pool.query("SELECT * FROM multiapisdb.information_schema.tables");
-    res.status(200).json(r.rows);
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+  if (!nombres || !apellidos || !documento || !correo) {
+    return res.status(400).json({ error: "nombres, apellidos, documento y correo son obligatorios" });
   }
-});
-
-// Mantén /health si ya lo tenías
-app.get("/health", (_req, res) => res.json({ status: "ok", service: "users-api" }));
-
-
-// Crear usuario 
-app.post("/users", async (req, res) => {
-
-  let errores = [];
-  if (req.body.length != undefined) {
-    for (let x = 0; x < req.body.length; x++) {
-      const { name, email } = req.body[x] ?? {};
-      if (!name || !email) errores.push({ error: "name & email son obligatorios para " + (x + 1) });
-      // if (!name || !email) return res.status(400).json({ error: "name & email required" });
-    }
-
-    if (errores.length > 0) return res.status(400).json(errores);
-    // let resultado = { "201": [] };
-    let resultado = {};
-    resultado["201"] = [];
-    try {
-      for (let x = 0; x < req.body.length; x++) {
-        console.log(req.body[x]);
-        const { name, email } = req.body[x] ?? {};
-
-        const r = await pool.query(
-          "INSERT INTO users_schema.users(name, email) VALUES($1, $2) RETURNING id, name, email",
-          [name, email]
-        );
-        resultado['201'].push(r.rows);
-        // res.status(201).json(r.rows);
-        // res.json(r);
-      }
-      res.status(201).json(resultado);
-    } catch (e) {
-      return res.status(500).json({ error: "error creando usuario", detail: String(e) });
-    }
-  } else {
-    const { name, email } = req.body ?? {};
-    if (!name || !email) return res.status(400).json({ error: "name & email required" });
-
-    try {
-      const r = await pool.query(
-        "INSERT INTO users_schema.users(name, email) VALUES($1, $2) RETURNING id, name, email",
-        [name, email]
-      );
-      res.status(201).json(r.rows);
-      // res.json(r);
-    } catch (e) {
-      res.status(500).json({ error: "error creando usuario", detail: String(e) });
-    }
-  }
-
-});
-
-
-// Actualizar usuario 
-app.put("/users/:id", async (req, res) => {
-  const { name, email } = req.body ?? {};
-  if (!name || !email) return res.status(400).json({ error: "name & email required" });
 
   try {
-    const r = await pool.query(
-      "UPDATE users_schema.users SET name=$1, email=$2 WHERE id=$3 RETURNING id, name, email",
-      [name, email, req.params.id]
-    );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
+    const q = `
+      INSERT INTO patients_schema.pacientes
+        (nombres, apellidos, documento, correo, telefono, fecha_nacimiento, genero)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING id, nombres, apellidos, documento, correo, telefono, fecha_nacimiento, genero
+    `;
+    const r = await pool.query(q, [nombres, apellidos, documento, correo, telefono, fecha_nacimiento, genero]);
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    // 23505 = unique_violation (documento/correo duplicado)
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Documento o correo ya registrado", detail: e.detail || String(e) });
     }
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error creando paciente", detail: String(e) });
   }
 });
 
-// Reiniciar tabla
-app.put("/tables", async (req, res) => {
+// Actualizar paciente (parcial)
+app.put("/patients/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const {
+    nombres = null, apellidos = null, documento = null, correo = null,
+    telefono = null, fecha_nacimiento = null, genero = null
+  } = req.body ?? {};
+
   try {
-    const r = await pool.query("TRUNCATE TABLE users_schema.users RESTART IDENTITY");
-    res.status(200).json({ mensaje: "Tabla reiniciada" });
+    const q = `
+      UPDATE patients_schema.pacientes SET
+        nombres = COALESCE($2, nombres),
+        apellidos = COALESCE($3, apellidos),
+        documento = COALESCE($4, documento),
+        correo = COALESCE($5, correo),
+        telefono = COALESCE($6, telefono),
+        fecha_nacimiento = COALESCE($7, fecha_nacimiento),
+        genero = COALESCE($8, genero)
+      WHERE id = $1
+      RETURNING id, nombres, apellidos, documento, correo, telefono, fecha_nacimiento, genero
+    `;
+    const r = await pool.query(q, [id, nombres, apellidos, documento, correo, telefono, fecha_nacimiento, genero]);
+    if (r.rowCount === 0) return res.status(404).json({ error: "Paciente no encontrado" });
+    res.json(r.rows[0]);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Documento o correo ya registrado", detail: e.detail || String(e) });
+    }
+    res.status(500).json({ error: "Error actualizando paciente", detail: String(e) });
   }
 });
 
-
-// Eliminar usuarios por id
-app.delete("/users/:id", async (req, res) => {
+// Eliminar paciente
+app.delete("/patients/:id", async (req, res) => {
   try {
     const r = await pool.query(
-      "DELETE FROM users_schema.users WHERE id=$1 RETURNING id, name, email",
-      [req.params.id]
+      "DELETE FROM patients_schema.pacientes WHERE id=$1 RETURNING id",
+      [Number(req.params.id)]
     );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
-    }
+    if (r.rowCount === 0) return res.status(404).json({ error: "Paciente no encontrado" });
+    res.json({ message: "Paciente eliminado", id: r.rows[0].id });
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error eliminando paciente", detail: String(e) });
   }
 });
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(publicDir, "index.html"));
+// (Opcional) Reset de tabla para pruebas rápidas
+app.put("/tables", async (_req, res) => {
+  try {
+    await pool.query("TRUNCATE TABLE patients_schema.pacientes RESTART IDENTITY CASCADE");
+    res.json({ message: "Tabla pacientes reiniciada" });
+  } catch (e) {
+    res.status(500).json({ error: "Error reseteando tabla", detail: String(e) });
+  }
 });
 
-app.listen(PORT, () => console.log(`✅ users-api on http://localhost:${PORT}`));
+// ====== SERVIR EL FRONTEND (Vite) ======
+const publicDir = path.join(__dirname, "../public");
+app.use(express.static(publicDir));
+app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+
+app.listen(PORT, () => console.log(`✅ ${SERVICE} en http://localhost:${PORT}`));
