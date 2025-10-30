@@ -48,6 +48,11 @@ jobs:
 
       - name: 🛠️ Set up Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container     # <-- fuerza driver compatible con cache GHA
+          use: true                    # <-- deja este builder como default
+          driver-opts: image=moby/buildkit:latest
+
 
       - name: 🏷️ Set version tag (short sha)
         id: vars
