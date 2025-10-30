@@ -46,15 +46,6 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 🛠️ Set up Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container     # <-- fuerza driver compatible con cache GHA
-          use: true                    # <-- deja este builder como default
-          install: true
-          driver-opts: |
-            image=moby/buildkit:latest
-
       - name: 🏷️ Set version tag (short sha)
         id: vars
         run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
@@ -84,7 +75,6 @@ jobs:
       - name: 🏗️ Build & Push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
-          builder: ${{ steps.buildx.outputs.name }}   # 👈 fuerza el builder correcto
           context: ${{ matrix.context }}
           push: true
           tags: |
