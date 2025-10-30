@@ -46,11 +46,13 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 🏷️ Set version tag (short sha)
-        id: vars
-        run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+      # Igual que tu workflow "simple"
+      - name: 🔐 Azure Login (Service Principal)
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Selecciona el ACR según el servicio de la matrix
+      # Elegimos a qué ACR loguearnos según el item de la matrix
       - name: 🔧 Select ACR for this service
         id: select-acr
         shell: bash
@@ -72,15 +74,14 @@ jobs:
           username: ${{ steps.select-acr.outputs.USERNAME }}
           password: ${{ steps.select-acr.outputs.PASSWORD }}
 
+      - name: 🏷️ Set version tag (short sha)
+        id: vars
+        run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      # === Build & Push con docker CLI (como tu ejemplo que ya funciona) ===
       - name: 🏗️ Build & Push ${{ matrix.service }}
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ matrix.context }}
-          push: true
-          tags: |
-            ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:latest
-            ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:${{ steps.vars.outputs.TAG }}
-          build-args: |
-            VITE_API_BASE=/
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build -t ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:latest ${{ matrix.context }}
+          docker tag  ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:latest ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:${{ steps.vars.outputs.TAG }}
+          docker push ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:latest
+          docker push ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:${{ steps.vars.outputs.TAG }}
