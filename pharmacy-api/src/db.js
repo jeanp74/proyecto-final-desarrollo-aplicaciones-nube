@@ -8,10 +8,10 @@
 // products-api/src/db.js
 import mongoose from "mongoose";
 
-const uri = process.env.PRODUCTS_MONGO_URI; // <- nueva variable
+const uri = process.env.PHARMACY_MONGO_URI; // <- nueva variable
 
 export async function connectMongo() {
-  if (!uri) throw new Error("PRODUCTS_MONGO_URI no iniciada");
+  if (!uri) throw new Error("PHARMACY_MONGO_URI no iniciada");
   // Para Cosmos RU-based, asegúrate de retryWrites=false en la URI
   // Para vCore, el SRV ya trae opciones correctas
   try {
