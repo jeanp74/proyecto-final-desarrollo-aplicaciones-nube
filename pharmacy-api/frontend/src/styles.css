@@ -313,3 +313,29 @@ footer {
     padding: 16px;
     color: var(--muted);
 }
+/* apílalos en header */
+.api-config.stack .row { display: flex; gap: .5rem; align-items: center; margin-bottom: .25rem; }
+.api-config.stack label { min-width: 120px; }
+
+/* select bonito y consistente */
+.pretty-select {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+.pretty-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  padding-right: 2rem;
+}
+.pretty-select::after {
+  content: "▾";
+  position: absolute;
+  right: .6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  opacity: .7;
+}
