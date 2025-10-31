@@ -101,6 +101,19 @@ async function nextSeq(seqKey) {
   return doc.seq; // 1, 2, 3, ...
 }
 
+/* ===== Helper: construir filtro por :id (numérico o ObjectId) ===== */
+function buildIdFilter(idParam) {
+  // ¿viene un id numérico? (solo dígitos)
+  if (/^\d+$/.test(idParam)) {
+    return { id: Number(idParam) }; // usamos el id numérico secuencial
+  }
+  // ¿viene un ObjectId válido?
+  if (isValidObjectId(idParam)) {
+    return { _id: idParam }; // usamos el _id de Mongo
+  }
+  return null;
+}
+
 /* ================== Health & Doc ================== */
 app.get("/health", (_req, res) => res.json({ status: "ok", service: SERVICE }));
 app.get("/db/health", async (_req, res) => {
@@ -117,9 +130,9 @@ app.get("/api", (_req, res) =>
     _collection: COLL,
     GET: {
       "/medicines": "Listar medicamentos (__kind=pharmacy_medicamentos)",
-      "/medicines/:id": "Obtener medicamento",
+      "/medicines/:id": "Obtener medicamento por _id (ObjectId) o por id numérico",
       "/prescriptions": "Listar recetas (__kind=pharmacy_recetas, filtros ?paciente_id=&medico_id=)",
-      "/prescriptions/:id": "Obtener receta",
+      "/prescriptions/:id": "Obtener receta por _id (ObjectId) o por id numérico",
       "/db/health": "Salud de la base de datos",
       "/health": "Salud del servicio"
     },
@@ -128,10 +141,10 @@ app.get("/api", (_req, res) =>
       "/prescriptions": "Crear receta (descuenta stock)",
     },
     PUT: {
-      "/medicines/:id": "Actualizar medicamento",
-      "/medicines/:id/stock": "Ajustar stock (delta o stock)",
+      "/medicines/:id": "Actualizar medicamento (id numérico o _id)",
+      "/medicines/:id/stock": "Ajustar stock (id numérico o _id)",
     },
-    DELETE: { "/medicines/:id": "Eliminar medicamento" },
+    DELETE: { "/medicines/:id": "Eliminar medicamento (id numérico o _id)" },
     note: "Colección compartida; diferenciamos por __kind y añadimos 'id' numérico autoincremental.",
   })
 );
@@ -148,12 +161,13 @@ app.get("/medicines", async (_req, res) => {
   }
 });
 
-// Obtener 1 por _id de Mongo (el front puede seguir usando _id)
+// Obtener 1 por id numérico O por _id de Mongo
 app.get("/medicines/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
-    const med = await Medicine.findOne({ _id: id }).lean();
+    const filter = buildIdFilter(req.params.id);
+    if (!filter) return res.status(400).json({ error: "ID inválido" });
+
+    const med = await Medicine.findOne(filter).lean(); // usando el modelo discriminador (filtra __kind)
     if (!med) return res.status(404).json({ error: "No encontrado" });
     res.json(med);
   } catch (e) {
@@ -175,18 +189,18 @@ app.post("/medicines", async (req, res) => {
   }
 });
 
-// Actualizar (no tocamos el id)
+// Actualizar (id numérico o _id)
 app.put("/medicines/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
+    const filter = buildIdFilter(req.params.id);
+    if (!filter) return res.status(400).json({ error: "ID inválido" });
 
     const payload = {};
     ["nombre", "sku", "precio", "unidad", "stock"].forEach((k) => {
       if (req.body?.[k] !== undefined) payload[k] = req.body[k];
     });
 
-    const med = await Medicine.findOneAndUpdate({ _id: id }, payload, { new: true, runValidators: true }).lean();
+    const med = await Medicine.findOneAndUpdate(filter, payload, { new: true, runValidators: true }).lean();
     if (!med) return res.status(404).json({ error: "No encontrado" });
     res.json(med);
   } catch (e) {
@@ -194,12 +208,13 @@ app.put("/medicines/:id", async (req, res) => {
   }
 });
 
-// Eliminar
+// Eliminar (id numérico o _id)
 app.delete("/medicines/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
-    const out = await Medicine.findOneAndDelete({ _id: id }).lean();
+    const filter = buildIdFilter(req.params.id);
+    if (!filter) return res.status(400).json({ error: "ID inválido" });
+
+    const out = await Medicine.findOneAndDelete(filter).lean();
     if (!out) return res.status(404).json({ error: "No encontrado" });
     res.json({ message: "Eliminado", id: out._id });
   } catch (e) {
@@ -207,34 +222,22 @@ app.delete("/medicines/:id", async (req, res) => {
   }
 });
 
-// Ajustar stock: { delta: -3 } o { stock: 50 }
+// Ajustar stock: { delta: -3 } o { stock: 50 } (id numérico o _id)
 app.put("/medicines/:id/stock", async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
+    const filterBase = buildIdFilter(req.params.id);
+    if (!filterBase) return res.status(400).json({ error: "ID inválido" });
 
     const { delta, stock } = req.body ?? {};
     let med;
 
     if (typeof delta === "number" && delta !== 0) {
-      // Aumenta/disminuye stock sólo si no queda negativo
-      const bulk = await Item.bulkWrite(
-        [
-          {
-            updateOne: {
-              filter: { _id: new mongoose.Types.ObjectId(id), [discriminatorKey]: KIND_MED, stock: { $gte: -delta } },
-              update: { $inc: { stock: delta } },
-            },
-          },
-        ],
-        { ordered: true }
-      );
-      if ((bulk.modifiedCount || 0) === 0) {
-        return res.status(409).json({ error: "Stock insuficiente o no encontrado" });
-      }
-      med = await Medicine.findOne({ _id: id }).lean();
+      // Actualización atómica con condición de no-negativo
+      const filter = { ...filterBase, stock: { $gte: -delta } };
+      med = await Medicine.findOneAndUpdate(filter, { $inc: { stock: delta } }, { new: true }).lean();
+      if (!med) return res.status(409).json({ error: "Stock insuficiente o no encontrado" });
     } else if (typeof stock === "number" && stock >= 0) {
-      med = await Medicine.findOneAndUpdate({ _id: id }, { stock }, { new: true }).lean();
+      med = await Medicine.findOneAndUpdate(filterBase, { stock }, { new: true }).lean();
       if (!med) return res.status(404).json({ error: "No encontrado" });
     } else {
       return res.status(400).json({ error: "Debes enviar { delta } o { stock } válido" });
@@ -261,12 +264,13 @@ app.get("/prescriptions", async (req, res) => {
   }
 });
 
-// Obtener 1 por _id de Mongo
+// Obtener 1 receta por id numérico O por _id de Mongo
 app.get("/prescriptions/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
-    const p = await Prescription.findOne({ _id: id }).lean();
+    const filter = buildIdFilter(req.params.id);
+    if (!filter) return res.status(400).json({ error: "ID inválido" });
+
+    const p = await Prescription.findOne(filter).lean();
     if (!p) return res.status(404).json({ error: "No encontrado" });
     res.json(p);
   } catch (e) {
@@ -295,14 +299,14 @@ app.post("/prescriptions", async (req, res) => {
       if (m.stock < it.cantidad) return res.status(409).json({ error: `Stock insuficiente para ${m.nombre}` });
     }
 
-    // Descontar stock (en la misma colección, asegurando __kind correcto)
+    // Descontar stock (usamos modelo discriminador, por lo que ya filtra __kind)
     const bulkOps = items.map((it) => ({
       updateOne: {
-        filter: { _id: new mongoose.Types.ObjectId(it.medicina_id), [discriminatorKey]: KIND_MED, stock: { $gte: it.cantidad } },
+        filter: { _id: new mongoose.Types.ObjectId(it.medicina_id), stock: { $gte: it.cantidad } },
         update: { $inc: { stock: -it.cantidad } },
       },
     }));
-    const bulk = await Item.bulkWrite(bulkOps, { ordered: true });
+    const bulk = await Medicine.bulkWrite(bulkOps, { ordered: true });
     if ((bulk.modifiedCount || 0) === 0) return res.status(409).json({ error: "No se pudo descontar stock" });
 
     // id numérico autoincremental para la receta
@@ -326,5 +330,5 @@ app.use(express.static(publicDir));
 app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
 app.listen(PORT, () => {
-  console.log(`✅ ${SERVICE} en http://localhost:${PORT} — colección '${COLL}', __kind: { meds:'${KIND_MED}', rx:'${KIND_RX}' } con IDs numéricos`);
+  console.log(`✅ ${SERVICE} en http://localhost:${PORT} — colección '${COLL}', __kind: { meds:'${KIND_MED}', rx:'${KIND_RX}' } con IDs numéricos y rutas que aceptan _id o id`);
 });
