@@ -18,46 +18,56 @@ const SERVICE = process.env.SERVICE_NAME || "pharmacy-api";
 /* ========= Conexión a Cosmos (Mongo API) ========= */
 await connectMongo();
 
-/* ========= Unificar en la MISMA colección =========
-   - Usamos la colección que ya usa "products".
-   - Discriminamos por __kind: 'pharmacy_medicamentos' | 'pharmacy_recetas'
+/* ========= MISMA colección que products + discriminador =========
+   - Colección compartida (por defecto 'products')
+   - Clave discriminadora: __kind
+   - Valores:
+       * 'pharmacy_medicamentos'  → documentos de inventario de farmacia
+       * 'pharmacy_recetas'       → documentos de recetas
 */
-const COLL = process.env.PRODUCTS_COLLECTION || "products"; // <— misma colección que products
+const COLL = process.env.PRODUCTS_COLLECTION || "products";
 const discriminatorKey = "__kind";
+const KIND_MED = "pharmacy_medicamentos";
+const KIND_RX  = "pharmacy_recetas";
+
+// (Opcional) Si existen documentos antiguos con otros valores, habilita compat aquí:
+// const LEGACY_KIND_MED = "pharmacy_med";
+// const LEGACY_KIND_RX  = "pharmacy_rx";
 
 const BaseSchema = new mongoose.Schema(
   {},
   { strict: false, discriminatorKey, collection: COLL, timestamps: true }
 );
 
+// Modelo base que apunta a la MISMA colección
 const Item = mongoose.model("Item", BaseSchema, COLL);
 
-// Medicamentos (inventario) — __kind = 'pharmacy_medicamentos'
+// Discriminador: Medicamentos (inventario)
 const Medicine = Item.discriminator(
-  "pharmacy_medicamentos",
+  KIND_MED,
   new mongoose.Schema(
     {
       nombre: { type: String, required: true, trim: true },
-      sku: { type: String, trim: true },        // no marcamos unique para no chocar con products
+      sku: { type: String, trim: true },  // no marcamos unique para no chocar con "products"
       stock: { type: Number, required: true, min: 0 },
       precio: { type: Number, default: 0, min: 0 },
-      unidad: { type: String, trim: true, default: "und" }, // und, caja, ml...
+      unidad: { type: String, trim: true, default: "und" },
     },
     { strict: false }
   )
 );
 
-// Recetas — __kind = 'pharmacy_recetas'
+// Discriminador: Recetas
 const Prescription = Item.discriminator(
-  "pharmacy_recetas",
+  KIND_RX,
   new mongoose.Schema(
     {
       paciente_id: { type: Number, required: true },
-      medico_id: { type: Number, required: true },
+      medico_id:   { type: Number, required: true },
       items: [
         {
           medicina_id: { type: mongoose.Schema.Types.ObjectId, required: true },
-          cantidad: { type: Number, required: true, min: 1 },
+          cantidad:    { type: Number, required: true, min: 1 },
         },
       ],
       notas: { type: String, trim: true },
@@ -82,32 +92,32 @@ app.get("/api", (_req, res) =>
   res.json({
     _collection: COLL,
     GET: {
-      "/medicines": "Listar medicamentos (solo __kind=pharmacy_medicamentos)",
+      "/medicines": "Listar medicamentos (__kind=pharmacy_medicamentos)",
       "/medicines/:id": "Obtener medicamento",
-      "/prescriptions": "Listar recetas (solo __kind=pharmacy_recetas)",
+      "/prescriptions": "Listar recetas (__kind=pharmacy_recetas, filtros ?paciente_id=&medico_id=)",
       "/prescriptions/:id": "Obtener receta",
     },
     POST: {
       "/medicines": "Crear medicamento",
-      "/prescriptions": "Crear receta y descuenta stock",
+      "/prescriptions": "Crear receta (descuenta stock)",
     },
     PUT: {
       "/medicines/:id": "Actualizar medicamento",
       "/medicines/:id/stock": "Ajustar stock (delta o stock)",
     },
     DELETE: { "/medicines/:id": "Eliminar medicamento" },
-    note: "Todos los documentos conviven en la MISMA colección; se filtra por __kind.",
+    note: "La colección es compartida; diferenciamos por __kind.",
   })
 );
 
 /* ================== Medicamentos ================== */
-// Listar SOLO los de __kind='pharmacy_medicamentos'
+// Listar SOLO los documentos de inventario
 app.get("/medicines", async (_req, res) => {
   const meds = await Medicine.find().sort({ nombre: 1 }).lean();
   res.json(meds);
 });
 
-// Obtener 1 (validando __kind)
+// Obtener 1 (valida que sea del tipo correcto)
 app.get("/medicines/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
@@ -128,7 +138,7 @@ app.post("/medicines", async (req, res) => {
   }
 });
 
-// Actualizar (filtrando por __kind)
+// Actualizar
 app.put("/medicines/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
@@ -149,7 +159,7 @@ app.put("/medicines/:id", async (req, res) => {
   }
 });
 
-// Eliminar (filtrando por __kind)
+// Eliminar
 app.delete("/medicines/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
@@ -167,12 +177,20 @@ app.put("/medicines/:id/stock", async (req, res) => {
   try {
     let med;
     if (typeof delta === "number" && delta !== 0) {
-      med = await Medicine.findOneAndUpdate(
-        { _id: id, stock: { $gte: -delta } }, // evita negativos
-        { $inc: { stock: delta } },
-        { new: true }
-      ).lean();
-      if (!med) return res.status(409).json({ error: "Stock insuficiente o no encontrado" });
+      // Usamos Item.bulkWrite para garantizar que solo toque __kind correcto
+      const bulk = await Item.bulkWrite(
+        [
+          {
+            updateOne: {
+              filter: { _id: new mongoose.Types.ObjectId(id), [discriminatorKey]: KIND_MED, stock: { $gte: -delta } },
+              update: { $inc: { stock: delta } },
+            },
+          },
+        ],
+        { ordered: true }
+      );
+      if ((bulk.modifiedCount || 0) === 0) return res.status(409).json({ error: "Stock insuficiente o no encontrado" });
+      med = await Medicine.findOne({ _id: id }).lean();
     } else if (typeof stock === "number" && stock >= 0) {
       med = await Medicine.findOneAndUpdate({ _id: id }, { stock }, { new: true }).lean();
       if (!med) return res.status(404).json({ error: "No encontrado" });
@@ -186,16 +204,16 @@ app.put("/medicines/:id/stock", async (req, res) => {
 });
 
 /* ================== Recetas ================== */
-// Listar SOLO __kind='pharmacy_recetas'
+// Listar SOLO recetas (no hace falta poner __kind: lo maneja el discriminador)
 app.get("/prescriptions", async (req, res) => {
-  const q = { [discriminatorKey]: "pharmacy_recetas" };
+  const q = {};
   if (req.query.paciente_id) q.paciente_id = Number(req.query.paciente_id);
   if (req.query.medico_id) q.medico_id = Number(req.query.medico_id);
   const items = await Prescription.find(q).sort({ fecha: -1 }).lean();
   res.json(items);
 });
 
-// Obtener 1
+// Obtener 1 receta
 app.get("/prescriptions/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
@@ -204,14 +222,15 @@ app.get("/prescriptions/:id", async (req, res) => {
   res.json(p);
 });
 
-// Crear en la misma colección y descontar stock (pharmacy_medicamentos)
+// Crear receta y descontar stock de medicamentos
 app.post("/prescriptions", async (req, res) => {
   try {
     const { paciente_id, medico_id, items, notas } = req.body ?? {};
     if (!paciente_id || !medico_id || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "paciente_id, medico_id e items son obligatorios" });
     }
-    // Validar medicinas
+
+    // Validar medicinas y stock
     const ids = items.map((it) => it.medicina_id);
     if (!ids.every(isValidObjectId)) return res.status(400).json({ error: "Algún medicina_id es inválido" });
 
@@ -224,10 +243,10 @@ app.post("/prescriptions", async (req, res) => {
       if (m.stock < it.cantidad) return res.status(409).json({ error: `Stock insuficiente para ${m.nombre}` });
     }
 
-    // Descuento de stock (en la misma colección sobre __kind=pharmacy_medicamentos)
+    // Descontar stock — garantizando __kind correcto
     const bulkOps = items.map((it) => ({
       updateOne: {
-        filter: { _id: new mongoose.Types.ObjectId(it.medicina_id), [discriminatorKey]: "pharmacy_medicamentos", stock: { $gte: it.cantidad } },
+        filter: { _id: new mongoose.Types.ObjectId(it.medicina_id), [discriminatorKey]: KIND_MED, stock: { $gte: it.cantidad } },
         update: { $inc: { stock: -it.cantidad } },
       },
     }));
@@ -251,4 +270,4 @@ const publicDir = path.join(__dirname, "../public");
 app.use(express.static(publicDir));
 app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
-app.listen(PORT, () => console.log(`✅ ${SERVICE} usando colección '${COLL}' en http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`✅ ${SERVICE} usando colección '${COLL}' y __kind { meds:'${KIND_MED}', recetas:'${KIND_RX}' } en http://localhost:${PORT}`));
