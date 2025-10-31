@@ -33,6 +33,7 @@ export async function connectMongo() {
   mongoose.set("strictQuery", true);
   await mongoose.connect(uri, {
     serverSelectionTimeoutMS: 30000,
+    dbName: "shop"
   });
   console.log("✅ Conectado a Cosmos (Mongo API)");
 }
