@@ -1,345 +1,304 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, getApiBase, setApiBase } from './api'
+import { useEffect, useMemo, useState } from "react";
+import { api, getApiBase, setApiBase } from "./api";
 
-function useProducts() {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [page, setPage] = useState(1)
-  const [pages, setPages] = useState(1)
-  const [total, setTotal] = useState(0)
+/* ====== Inventario (Medicines) ====== */
+function useMedicines() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const load = async ({ page = 1, q = '', category = '' } = {}) => {
-    setLoading(true)
-    setError('')
+  const load = async () => {
+    setLoading(true); setError("");
     try {
-      const params = new URLSearchParams()
-      if (page) params.set('page', String(page))
-      if (q) params.set('q', q)
-      if (category) params.set('category', category)
-      const res = await api(`/products?${params.toString()}`)
-      setItems(res.items || [])
-      setPage(res.page || 1)
-      setPages(res.pages || 1)
-      setTotal(res.total || 0)
+      const data = await api("/medicines");
+      setItems(data);
     } catch (e) {
-      setError(e.message)
+      setError(e.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const create = async (payload) => {
-    const created = await api('/products', { method: 'POST', body: JSON.stringify(payload) })
-    // reload current page to get server canonical data
-    await load({ page })
-    return created
-  }
+    const m = await api("/medicines", { method: "POST", body: JSON.stringify(payload) });
+    setItems((prev) => [...prev, m].sort((a,b)=>a.nombre.localeCompare(b.nombre)));
+  };
 
   const update = async (id, payload) => {
-    const updated = await api(`/products/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
-    setItems((prev) => prev.map((p) => (String(p._id) === String(id) ? updated : p)))
-    return updated
-  }
+    const m = await api(`/medicines/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+    setItems((prev) => prev.map((x) => (x._id === id ? m : x)));
+  };
 
   const remove = async (id) => {
-    await api(`/products/${id}`, { method: 'DELETE' })
-    setItems((prev) => prev.filter((p) => String(p._id) !== String(id)))
-  }
+    await api(`/medicines/${id}`, { method: "DELETE" });
+    setItems((prev) => prev.filter((x) => x._id !== id));
+  };
 
-  return { items, loading, error, page, pages, total, load, create, update, remove }
+  const adjustStock = async (id, body) => {
+    const m = await api(`/medicines/${id}/stock`, { method: "PUT", body: JSON.stringify(body) });
+    setItems((prev) => prev.map((x) => (x._id === id ? m : x)));
+  };
+
+  return { items, loading, error, load, create, update, remove, adjustStock };
 }
 
-function Row({ product, onUpdate, onDelete }) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(product.name || '')
-  const [brand, setBrand] = useState(product.brand || '')
-  const [price, setPrice] = useState(() => {
-    const v = Array.isArray(product.variants) && product.variants[0] ? Number(product.variants[0].price || 0) : 0
-    return Number.isFinite(v) ? String(v) : '0'
-  })
-  const [stock, setStock] = useState(() => {
-    const v = Array.isArray(product.variants) && product.variants[0] ? Number(product.variants[0].stock || 0) : 0
-    return Number.isFinite(v) ? String(v) : '0'
-  })
-  const [saving, setSaving] = useState(false)
-  const [errors, setErrors] = useState({ name: '', price: '' })
+function MedRow({ item, onUpdate, onDelete, onAdjust }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(item);
+  const [delta, setDelta] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState({});
+
+  useEffect(()=>setForm(item),[item]);
+  const set = (k) => (e) => setForm((s)=>({ ...s, [k]: e.target.value }));
 
   const onSave = async () => {
-    const errs = { name: '', price: '' }
-    const n = name.trim()
-    const pr = Number(price)
-    const st = Number(stock)
-    if (!n) errs.name = 'Nombre requerido'
-    if (!Number.isFinite(pr) || pr < 0) errs.price = 'Precio inválido'
-    setErrors(errs)
-    if (errs.name || errs.price) return
-    setSaving(true)
-    try {
-      const patch = { name: n, brand: brand.trim(), variants: [{ ...(product.variants?.[0] || {}), price: pr, stock: Number.isFinite(st) ? st : 0 }] }
-      await onUpdate(product._id, patch)
-      setEditing(false)
-    } catch (e) {
-      // parent shows toast
-    } finally {
-      setSaving(false)
-    }
-  }
+    const f = {
+      nombre: (form.nombre||"").trim(),
+      sku: (form.sku||"").trim() || undefined,
+      precio: Number(form.precio ?? 0),
+      unidad: (form.unidad||"und").trim(),
+      stock: Number(form.stock ?? 0),
+    };
+    const e = {};
+    if (!f.nombre) e.nombre = "Requerido";
+    if (f.precio < 0) e.precio = ">= 0";
+    if (f.stock < 0 || !Number.isFinite(f.stock)) e.stock = ">= 0";
+    setErr(e);
+    if (Object.keys(e).length) return;
+
+    setSaving(true);
+    try { await onUpdate(item._id, f); setEditing(false); } finally { setSaving(false); }
+  };
+
+  const onApplyDelta = async () => {
+    const d = Number(delta);
+    if (!Number.isFinite(d) || d === 0) return alert("Delta inválido");
+    try { await onAdjust(item._id, { delta: d }); setDelta(""); } catch(e){ alert(e.message); }
+  };
 
   return (
     <tr>
-      <td>{product._id}</td>
-      <td>{product.category}</td>
-      <td>
-        {editing ? (
-          <div className="field-with-error">
-            <input className="row-edit-input" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!errors.name} />
-            {errors.name && <small className="field-error">{errors.name}</small>}
-          </div>
-        ) : (
-          <span>{product.name}</span>
-        )}
-      </td>
-      <td>
-        {editing ? (
-          <input className="row-edit-input" value={brand} onChange={(e) => setBrand(e.target.value)} />
-        ) : (
-          <span>{product.brand || '-'}</span>
-        )}
-      </td>
-      <td>
-        {editing ? (
-          <div className="field-with-error">
-            <input className="row-edit-input" value={price} onChange={(e) => setPrice(e.target.value)} />
-            {errors.price && <small className="field-error">{errors.price}</small>}
-          </div>
-        ) : (
-          <span>{Array.isArray(product.variants) && product.variants[0] ? Number(product.variants[0].price).toFixed(2) : '-'}</span>
-        )}
-      </td>
-      <td>
-        {editing ? (
-          <input className="row-edit-input" value={stock} onChange={(e) => setStock(e.target.value)} />
-        ) : (
-          <span>{Array.isArray(product.variants) && product.variants[0] ? product.variants[0].stock : '-'}</span>
-        )}
-      </td>
+      <td>{item._id.slice(-6)}</td>
+      <td>{editing ? <input className="row-edit-input" value={form.nombre||""} onChange={set("nombre")} aria-invalid={!!err.nombre}/> : item.nombre}</td>
+      <td>{editing ? <input className="row-edit-input" value={form.sku||""} onChange={set("sku")}/> : (item.sku||"")}</td>
+      <td className="right">{editing ? <input className="row-edit-input" value={form.precio??0} onChange={set("precio")}/> : (item.precio??0)}</td>
+      <td className="center">{editing ? <input className="row-edit-input" value={form.unidad||"und"} onChange={set("unidad")}/> : (item.unidad||"und")}</td>
+      <td className="right">{editing ? <input className="row-edit-input" value={form.stock??0} onChange={set("stock")} aria-invalid={!!err.stock}/> : (item.stock??0)}</td>
       <td className="row-actions">
         {editing ? (
           <>
             <button onClick={onSave} disabled={saving}>Guardar</button>
-            <button className="secondary" onClick={() => setEditing(false)} disabled={saving}>Cancelar</button>
+            <button className="secondary" onClick={()=>setEditing(false)} disabled={saving}>Cancelar</button>
           </>
         ) : (
           <>
-            <button className="secondary" onClick={() => setEditing(true)}>Editar</button>
-            <button className="danger" onClick={() => onDelete(product._id)}>Eliminar</button>
+            <input className="row-edit-input" style={{width: 60}} placeholder="+/-" value={delta} onChange={(e)=>setDelta(e.target.value)}/>
+            <button className="secondary" onClick={onApplyDelta}>Aplicar</button>
+            <button className="secondary" onClick={()=>setEditing(true)}>Editar</button>
+            <button className="danger" onClick={()=>onDelete(item._id)}>Eliminar</button>
           </>
         )}
       </td>
     </tr>
-  )
+  );
+}
+
+/* ====== Recetas ====== */
+function usePrescriptions() {
+  const [items, setItems] = useState([]);
+  const load = async (filters={}) => {
+    const qs = new URLSearchParams(filters).toString();
+    const data = await api("/prescriptions" + (qs ? `?${qs}` : ""));
+    setItems(data);
+  };
+  const create = async (payload) => {
+    const p = await api("/prescriptions", { method: "POST", body: JSON.stringify(payload) });
+    setItems((prev)=>[p, ...prev]);
+  };
+  return { items, load, create };
 }
 
 export default function App() {
-  const { items, loading, error, page, pages, total, load, create, update, remove } = useProducts()
-  const [apiBase, setApiBaseState] = useState(getApiBase())
-  const apiLabel = useMemo(() => apiBase, [apiBase])
+  const { items: meds, loading, error, load, create, update, remove, adjustStock } = useMedicines();
+  const presc = usePrescriptions();
 
-  // toasts
-  const [toasts, setToasts] = useState([])
-  const notify = (message, type = 'info') => {
-    const id = Math.random().toString(36).slice(2)
-    setToasts((t) => [...t, { id, message, type }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500)
-  }
+  const [apiBase, setApiBaseState] = useState(getApiBase());
+  useEffect(() => { load(); presc.load(); }, []);
 
-  // search/filter
-  const [q, setQ] = useState('')
-  const [cat, setCat] = useState('')
-  const [qDeb, setQDeb] = useState('')
-  useEffect(() => { const id = setTimeout(() => setQDeb(q.trim()), 250); return () => clearTimeout(id) }, [q])
+  const [query, setQuery] = useState("");
+  const [qDeb, setQDeb] = useState("");
+  useEffect(()=>{ const t=setTimeout(()=>setQDeb(query.trim().toLowerCase()),250); return ()=>clearTimeout(t);},[query]);
 
-  useEffect(() => { load({ page: 1, q: qDeb, category: cat }) }, [qDeb, cat])
-  useEffect(() => { load({ page: 1 }) }, [])
+  const filtered = useMemo(()=>{
+    if(!qDeb) return meds;
+    return meds.filter(m => [m.nombre, m.sku].some(v=>String(v||"").toLowerCase().includes(qDeb)));
+  },[meds,qDeb]);
 
-  // create form
-  const [name, setName] = useState('')
-  const [category, setCategory] = useState('')
-  const [brand, setBrand] = useState('')
-  const [sku, setSku] = useState('SKU-001')
-  const [price, setPrice] = useState('0')
-  const [stock, setStock] = useState('0')
-  const [creating, setCreating] = useState(false)
-  const [errors, setErrors] = useState({ name: '', category: '', price: '' })
-
-  const onCreate = async (e) => {
-    e.preventDefault()
-    const errs = { name: '', category: '', price: '' }
-    const n = name.trim()
-    const c = category.trim()
-    const pr = Number(price)
-    if (!n) errs.name = 'Nombre requerido'
-    if (!c) errs.category = 'Categoría requerida'
-    if (!Number.isFinite(pr) || pr < 0) errs.price = 'Precio inválido'
-    setErrors(errs)
-    if (errs.name || errs.category || errs.price) return
-    setCreating(true)
-    try {
-      const payload = {
-        name: n,
-        category: c,
-        brand: brand.trim() || undefined,
-        variants: [{ sku: sku.trim() || 'SKU-001', price: pr, stock: Number(stock) || 0 }]
-      }
-      await create(payload)
-      setName(''); setCategory(''); setBrand(''); setSku('SKU-001'); setPrice('0'); setStock('0')
-      notify('Producto creado', 'success')
-    } catch (e) {
-      notify('Error creando: ' + e.message, 'error')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const onDelete = async (id) => {
-    if (!confirm('¿Eliminar producto?')) return
-    try {
-      await remove(id)
-      notify('Producto eliminado', 'success')
-    } catch (e) {
-      notify('Error eliminando: ' + e.message, 'error')
-    }
-  }
-
-  const updateWithNotify = async (id, patch) => {
-    try {
-      await update(id, patch)
-      notify('Producto actualizado', 'success')
-    } catch (e) {
-      notify('Error actualizando: ' + e.message, 'error')
-      throw e
-    }
-  }
-
-  const changePage = (dir) => {
-    const next = Math.min(Math.max(1, page + dir), pages)
-    if (next !== page) load({ page: next, q: qDeb, category: cat })
-  }
+  const [form, setForm] = useState({ nombre:"", sku:"", precio:"0", unidad:"und", stock:"0" });
+  const set = (k)=>(e)=> setForm(s=>({ ...s, [k]: e.target.value }));
 
   const onSaveBase = () => {
+    try { const u = new URL(apiBase, window.location.origin); if(!u.protocol.startsWith("http")) throw new Error(); setApiBase(apiBase); alert("API Base guardada"); }
+    catch { alert("URL inválida"); }
+  };
+
+  const onCreate = async (e) => {
+    e.preventDefault();
+    const payload = {
+      nombre: form.nombre.trim(),
+      sku: form.sku.trim() || undefined,
+      precio: Number(form.precio),
+      unidad: form.unidad.trim() || "und",
+      stock: Number(form.stock),
+    };
+    if (!payload.nombre) return alert("Nombre requerido");
+    if (!Number.isFinite(payload.stock) || payload.stock < 0) return alert("Stock inválido");
     try {
-      const u = new URL(apiBase)
-      if (!u.protocol.startsWith('http')) throw new Error('')
-      setApiBase(apiBase)
-      setApiBaseState(apiBase)
-      alert('API Base guardada')
-    } catch {
-      alert('URL inválida')
+      await create(payload);
+      setForm({ nombre:"", sku:"", precio:"0", unidad:"und", stock:"0" });
+    } catch (e) { alert(e.message); }
+  };
+
+  /* ====== Crear receta ====== */
+  const [rx, setRx] = useState({
+    paciente_id: "", medico_id: "",
+    item_medicina_id: "", item_cantidad: "",
+    items: [], notas: ""
+  });
+
+  const addRxItem = () => {
+    const id = rx.item_medicina_id;
+    const cantidad = Number(rx.item_cantidad);
+    if (!id || !Number.isFinite(cantidad) || cantidad <= 0) return alert("Selecciona medicina y cantidad > 0");
+    const med = meds.find((m)=>m._id===id);
+    if (!med) return alert("Medicina inválida");
+    setRx((s)=>({
+      ...s,
+      item_medicina_id:"", item_cantidad:"",
+      items: [...s.items, { medicina_id: id, nombre: med.nombre, cantidad }]
+    }));
+  };
+
+  const removeRxItem = (idx) => setRx((s)=>({ ...s, items: s.items.filter((_,i)=>i!==idx) }));
+
+  const submitRx = async (e) => {
+    e.preventDefault();
+    const payload = {
+      paciente_id: Number(rx.paciente_id),
+      medico_id: Number(rx.medico_id),
+      items: rx.items.map(({medicina_id, cantidad})=>({ medicina_id, cantidad })),
+      notas: rx.notas.trim() || undefined
+    };
+    if (!payload.paciente_id || !payload.medico_id || payload.items.length===0) return alert("Paciente, médico e items requeridos");
+    try {
+      await presc.create(payload);
+      alert("Receta creada y stock descontado");
+      setRx({ paciente_id:"", medico_id:"", item_medicina_id:"", item_cantidad:"", items:[], notas:"" });
+      load(); // recargar inventario por si cambió stock
+    } catch (e) {
+      alert("Error creando receta: " + e.message);
     }
-  }
+  };
 
   return (
     <div className="container">
       <header>
-        <h1>Products React</h1>
+        <h1>Farmacia</h1>
         <div className="api-config">
-          <label htmlFor="apiBase">API Base URL</label>
-          <input id="apiBase" value={apiBase} onChange={(e) => setApiBaseState(e.target.value)} />
+          <label htmlFor="apiBase">API Base</label>
+          <input id="apiBase" value={apiBase} onChange={(e)=>setApiBaseState(e.target.value)} placeholder="/" />
           <button onClick={onSaveBase}>Guardar</button>
         </div>
       </header>
 
-      {/* Toasts */}
-      <div className="toast-container">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>
-        ))}
-      </div>
-
       <main>
+        {/* Inventario */}
         <section className="card">
-          <h2>Crear producto</h2>
-          <form className="grid-form" onSubmit={onCreate}>
-            <div className="form-row">
-              <label htmlFor="name">Nombre</label>
-              <input id="name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!errors.name} />
-              {errors.name && <small className="field-error">{errors.name}</small>}
-            </div>
-            <div className="form-row">
-              <label htmlFor="category">Categoría</label>
-              <input id="category" value={category} onChange={(e) => setCategory(e.target.value)} aria-invalid={!!errors.category} />
-              {errors.category && <small className="field-error">{errors.category}</small>}
-            </div>
-            <div className="form-row">
-              <label htmlFor="brand">Marca (opcional)</label>
-              <input id="brand" value={brand} onChange={(e) => setBrand(e.target.value)} />
-            </div>
-            <div className="form-row">
-              <label htmlFor="sku">SKU</label>
-              <input id="sku" value={sku} onChange={(e) => setSku(e.target.value)} />
-            </div>
-            <div className="form-row">
-              <label htmlFor="price">Precio</label>
-              <input id="price" value={price} onChange={(e) => setPrice(e.target.value)} aria-invalid={!!errors.price} />
-              {errors.price && <small className="field-error">{errors.price}</small>}
-            </div>
-            <div className="form-row">
-              <label htmlFor="stock">Stock</label>
-              <input id="stock" value={stock} onChange={(e) => setStock(e.target.value)} />
-            </div>
-            <button type="submit" disabled={creating}>{creating ? 'Creando...' : 'Crear'}</button>
+          <h2>Registrar medicamento</h2>
+          <form onSubmit={onCreate} className="grid-form">
+            <div className="form-row"><label>Nombre</label><input value={form.nombre} onChange={set("nombre")} /></div>
+            <div className="form-row"><label>SKU</label><input value={form.sku} onChange={set("sku")} /></div>
+            <div className="form-row"><label>Precio</label><input value={form.precio} onChange={set("precio")} /></div>
+            <div className="form-row"><label>Unidad</label><input value={form.unidad} onChange={set("unidad")} /></div>
+            <div className="form-row"><label>Stock</label><input value={form.stock} onChange={set("stock")} /></div>
+            <button type="submit">Crear</button>
           </form>
         </section>
 
         <section className="card">
           <div className="list-header">
-            <h2>Productos</h2>
+            <h2>Inventario</h2>
             <div className="right">
-              <small>API: {apiLabel}</small>
-              <button onClick={() => load({ page: 1, q: qDeb, category: cat })} disabled={loading}>{loading ? 'Cargando...' : 'Actualizar'}</button>
+              <small>Registros: {filtered.length}</small>
+              <button onClick={load} disabled={loading}>{loading ? "Cargando..." : "Actualizar"}</button>
             </div>
           </div>
           <div className="list-tools">
-            <input className="search-input" placeholder="Buscar por nombre..." value={q} onChange={(e) => setQ(e.target.value)} />
-            <input className="search-input" placeholder="Filtrar por categoría..." value={cat} onChange={(e) => setCat(e.target.value)} />
-            <small className="muted">{total} total · página {page} de {pages}</small>
+            <input className="search-input" placeholder="Buscar por nombre o SKU..." value={query} onChange={(e)=>setQuery(e.target.value)} />
           </div>
           {error && <div className="list-status error">Error: {error}</div>}
-          {loading && <div className="list-status">Cargando...</div>}
-          <table id="productsTable">
+          <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Categoría</th>
-                <th>Nombre</th>
-                <th>Marca</th>
-                <th>Precio</th>
-                <th>Stock</th>
-                <th>Acciones</th>
+                <th>ID</th><th>Nombre</th><th>SKU</th><th>Precio</th><th>Unidad</th><th>Stock</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 ? (
-                <tr><td colSpan={7}><div className="empty-state">No hay productos</div></td></tr>
-              ) : (
-                items.map((p) => (
-                  <Row key={p._id} product={p} onUpdate={updateWithNotify} onDelete={onDelete} />
-                ))
-              )}
+              {filtered.length === 0 ? (
+                <tr><td colSpan={7}><div className="empty-state">Sin medicamentos.</div></td></tr>
+              ) : filtered.map((m)=>(
+                <MedRow key={m._id} item={m}
+                        onUpdate={update} onDelete={remove} onAdjust={adjustStock}/>
+              ))}
             </tbody>
           </table>
+        </section>
 
-          <div className="list-tools">
-            <button className="secondary" onClick={() => changePage(-1)} disabled={page <= 1 || loading}>Anterior</button>
-            <button className="secondary" onClick={() => changePage(1)} disabled={page >= pages || loading}>Siguiente</button>
+        {/* Recetas */}
+        <section className="card">
+          <h2>Crear receta</h2>
+          <form onSubmit={submitRx} className="grid-form">
+            <div className="form-row"><label>Paciente ID</label><input value={rx.paciente_id} onChange={(e)=>setRx(s=>({ ...s, paciente_id: e.target.value }))} /></div>
+            <div className="form-row"><label>Médico ID</label><input value={rx.medico_id} onChange={(e)=>setRx(s=>({ ...s, medico_id: e.target.value }))} /></div>
+            <div className="form-row">
+              <label>Medicamento</label>
+              <select value={rx.item_medicina_id} onChange={(e)=>setRx(s=>({ ...s, item_medicina_id: e.target.value }))}>
+                <option value="">(seleccione)</option>
+                {meds.map((m)=> <option key={m._id} value={m._id}>{m.nombre} — stock {m.stock}</option>)}
+              </select>
+            </div>
+            <div className="form-row"><label>Cantidad</label><input value={rx.item_cantidad} onChange={(e)=>setRx(s=>({ ...s, item_cantidad: e.target.value }))} /></div>
+            <div className="form-row"><button type="button" onClick={addRxItem}>Agregar ítem</button></div>
+            <div className="form-row"><label>Notas</label><input value={rx.notas} onChange={(e)=>setRx(s=>({ ...s, notas: e.target.value }))} /></div>
+            <button type="submit">Crear receta</button>
+          </form>
+
+          <div className="card" style={{marginTop: '1rem'}}>
+            <h3>Ítems de la receta</h3>
+            {rx.items.length === 0 ? <div className="empty-state">Sin ítems.</div> :
+              <ul>
+                {rx.items.map((it, idx)=>(
+                  <li key={idx}>
+                    {it.nombre} × {it.cantidad} <button className="danger" onClick={()=>removeRxItem(idx)}>Quitar</button>
+                  </li>
+                ))}
+              </ul>
+            }
+          </div>
+
+          <div className="card" style={{marginTop:'1rem'}}>
+            <h3>Recientes</h3>
+            <ul>
+              {presc.items.map((p)=>(
+                <li key={p._id}>#{p._id.slice(-6)} · paciente {p.paciente_id} · médico {p.medico_id} · {new Date(p.fecha).toLocaleString()}</li>
+              ))}
+            </ul>
           </div>
         </section>
       </main>
 
-      <footer>
-        <small>products-react · conectado a products-api</small>
-      </footer>
+      <footer><small>pharmacy-react · conectado a pharmacy-api</small></footer>
     </div>
-  )
+  );
 }

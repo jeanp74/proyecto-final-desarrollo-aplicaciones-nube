@@ -2,7 +2,7 @@ const STORAGE_KEY = 'products_react_api_base';
 
 export function getApiBase() {
   // return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_API_BASE || 'http://localhost:4002';
-  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_API_BASE || 'https://products-api-cloud-afa3h7hhhkb6cbhn.chilecentral-01.azurewebsites.net/';
+  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_API_BASE || 'https://pharmacy-proyecto-final-desarrollo-cgeyfreje5aqdxbr.brazilsouth-01.azurewebsites.net/';
 }
 
 export function setApiBase(v) {
