@@ -15,53 +15,64 @@ app.use(express.json());
 const PORT = process.env.PORT || 4003;
 const SERVICE = process.env.SERVICE_NAME || "pharmacy-api";
 
-/* ============ Conexión a Cosmos ============ */
+/* ========= Conexión a Cosmos (Mongo API) ========= */
 await connectMongo();
 
-/* ============ Modelos (Mongoose) ============ */
-const MedicineSchema = new mongoose.Schema(
-  {
-    nombre: { type: String, required: true, trim: true },
-    sku: { type: String, trim: true, unique: true, sparse: true }, // opcional único
-    stock: { type: Number, required: true, min: 0 },
-    precio: { type: Number, default: 0, min: 0 },
-    unidad: { type: String, trim: true, default: "und" }, // ej. und, caja, ml
-  },
-  { timestamps: true, versionKey: false }
+/* ========= Unificar en la MISMA colección =========
+   - Usamos la colección que ya usa "products".
+   - Discriminamos por __kind: 'pharmacy_medicamentos' | 'pharmacy_recetas'
+*/
+const COLL = process.env.PRODUCTS_COLLECTION || "products"; // <— misma colección que products
+const discriminatorKey = "__kind";
+
+const BaseSchema = new mongoose.Schema(
+  {},
+  { strict: false, discriminatorKey, collection: COLL, timestamps: true }
 );
 
-const PrescriptionItemSchema = new mongoose.Schema(
-  {
-    medicina_id: { type: mongoose.Schema.Types.ObjectId, ref: "Medicine", required: true },
-    cantidad: { type: Number, required: true, min: 1 },
-  },
-  { _id: false }
+const Item = mongoose.model("Item", BaseSchema, COLL);
+
+// Medicamentos (inventario) — __kind = 'pharmacy_medicamentos'
+const Medicine = Item.discriminator(
+  "pharmacy_medicamentos",
+  new mongoose.Schema(
+    {
+      nombre: { type: String, required: true, trim: true },
+      sku: { type: String, trim: true },        // no marcamos unique para no chocar con products
+      stock: { type: Number, required: true, min: 0 },
+      precio: { type: Number, default: 0, min: 0 },
+      unidad: { type: String, trim: true, default: "und" }, // und, caja, ml...
+    },
+    { strict: false }
+  )
 );
 
-const PrescriptionSchema = new mongoose.Schema(
-  {
-    paciente_id: { type: Number, required: true }, // ID de tu servicio de pacientes (PG)
-    medico_id: { type: Number, required: true },   // ID de tu servicio de doctores (PG)
-    items: { type: [PrescriptionItemSchema], validate: v => v && v.length > 0 },
-    notas: { type: String, trim: true },
-    fecha: { type: Date, default: Date.now },
-  },
-  { timestamps: true, versionKey: false }
+// Recetas — __kind = 'pharmacy_recetas'
+const Prescription = Item.discriminator(
+  "pharmacy_recetas",
+  new mongoose.Schema(
+    {
+      paciente_id: { type: Number, required: true },
+      medico_id: { type: Number, required: true },
+      items: [
+        {
+          medicina_id: { type: mongoose.Schema.Types.ObjectId, required: true },
+          cantidad: { type: Number, required: true, min: 1 },
+        },
+      ],
+      notas: { type: String, trim: true },
+      fecha: { type: Date, default: Date.now },
+    },
+    { strict: false }
+  )
 );
 
-// Índices útiles
-MedicineSchema.index({ nombre: 1 });
-PrescriptionSchema.index({ paciente_id: 1, fecha: -1 });
-
-const Medicine = mongoose.model("Medicine", MedicineSchema, "medicines");
-const Prescription = mongoose.model("Prescription", PrescriptionSchema, "prescriptions");
-
-/* ============ Endpoints básicos ============ */
+/* ================== Health & Doc ================== */
 app.get("/health", (_req, res) => res.json({ status: "ok", service: SERVICE }));
 app.get("/db/health", async (_req, res) => {
   try {
     await mongoose.connection.db.command({ ping: 1 });
-    res.json({ ok: true });
+    res.json({ ok: true, collection: COLL });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
@@ -69,13 +80,12 @@ app.get("/db/health", async (_req, res) => {
 
 app.get("/api", (_req, res) =>
   res.json({
+    _collection: COLL,
     GET: {
-      "/medicines": "Listar medicamentos",
+      "/medicines": "Listar medicamentos (solo __kind=pharmacy_medicamentos)",
       "/medicines/:id": "Obtener medicamento",
-      "/prescriptions": "Listar recetas (?paciente_id=&medico_id=)",
+      "/prescriptions": "Listar recetas (solo __kind=pharmacy_recetas)",
       "/prescriptions/:id": "Obtener receta",
-      "/db/health": "Salud DB",
-      "/health": "Salud servicio",
     },
     POST: {
       "/medicines": "Crear medicamento",
@@ -86,21 +96,22 @@ app.get("/api", (_req, res) =>
       "/medicines/:id/stock": "Ajustar stock (delta o stock)",
     },
     DELETE: { "/medicines/:id": "Eliminar medicamento" },
+    note: "Todos los documentos conviven en la MISMA colección; se filtra por __kind.",
   })
 );
 
-/* ============ Medicamentos ============ */
-// Listar
+/* ================== Medicamentos ================== */
+// Listar SOLO los de __kind='pharmacy_medicamentos'
 app.get("/medicines", async (_req, res) => {
   const meds = await Medicine.find().sort({ nombre: 1 }).lean();
   res.json(meds);
 });
 
-// Obtener 1
+// Obtener 1 (validando __kind)
 app.get("/medicines/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
-  const med = await Medicine.findById(id).lean();
+  const med = await Medicine.findOne({ _id: id }).lean();
   if (!med) return res.status(404).json({ error: "No encontrado" });
   res.json(med);
 });
@@ -113,12 +124,11 @@ app.post("/medicines", async (req, res) => {
     const med = await Medicine.create({ nombre, stock, precio, unidad, sku });
     res.status(201).json(med);
   } catch (e) {
-    if (e?.code === 11000) return res.status(409).json({ error: "SKU ya existe", detail: e.message });
     res.status(500).json({ error: "Error creando", detail: String(e) });
   }
 });
 
-// Actualizar
+// Actualizar (filtrando por __kind)
 app.put("/medicines/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
@@ -128,20 +138,22 @@ app.put("/medicines/:id", async (req, res) => {
     ["nombre", "sku", "precio", "unidad", "stock"].forEach((k) => {
       if (req.body?.[k] !== undefined) payload[k] = req.body[k];
     });
-    const med = await Medicine.findByIdAndUpdate(id, payload, { new: true, runValidators: true }).lean();
+    const med = await Medicine.findOneAndUpdate({ _id: id }, payload, {
+      new: true,
+      runValidators: true,
+    }).lean();
     if (!med) return res.status(404).json({ error: "No encontrado" });
     res.json(med);
   } catch (e) {
-    if (e?.code === 11000) return res.status(409).json({ error: "SKU ya existe", detail: e.message });
     res.status(500).json({ error: "Error actualizando", detail: String(e) });
   }
 });
 
-// Eliminar
+// Eliminar (filtrando por __kind)
 app.delete("/medicines/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
-  const out = await Medicine.findByIdAndDelete(id).lean();
+  const out = await Medicine.findOneAndDelete({ _id: id }).lean();
   if (!out) return res.status(404).json({ error: "No encontrado" });
   res.json({ message: "Eliminado", id: out._id });
 });
@@ -154,8 +166,7 @@ app.put("/medicines/:id/stock", async (req, res) => {
   const { delta, stock } = req.body ?? {};
   try {
     let med;
-    if (typeof delta === "number") {
-      // Incremento atómico y validación de no-negativo
+    if (typeof delta === "number" && delta !== 0) {
       med = await Medicine.findOneAndUpdate(
         { _id: id, stock: { $gte: -delta } }, // evita negativos
         { $inc: { stock: delta } },
@@ -163,7 +174,7 @@ app.put("/medicines/:id/stock", async (req, res) => {
       ).lean();
       if (!med) return res.status(409).json({ error: "Stock insuficiente o no encontrado" });
     } else if (typeof stock === "number" && stock >= 0) {
-      med = await Medicine.findByIdAndUpdate(id, { stock }, { new: true }).lean();
+      med = await Medicine.findOneAndUpdate({ _id: id }, { stock }, { new: true }).lean();
       if (!med) return res.status(404).json({ error: "No encontrado" });
     } else {
       return res.status(400).json({ error: "Debes enviar { delta } o { stock } válido" });
@@ -174,10 +185,10 @@ app.put("/medicines/:id/stock", async (req, res) => {
   }
 });
 
-/* ============ Recetas ============ */
-// Listar (filtros opcionales)
+/* ================== Recetas ================== */
+// Listar SOLO __kind='pharmacy_recetas'
 app.get("/prescriptions", async (req, res) => {
-  const q = {};
+  const q = { [discriminatorKey]: "pharmacy_recetas" };
   if (req.query.paciente_id) q.paciente_id = Number(req.query.paciente_id);
   if (req.query.medico_id) q.medico_id = Number(req.query.medico_id);
   const items = await Prescription.find(q).sort({ fecha: -1 }).lean();
@@ -188,21 +199,21 @@ app.get("/prescriptions", async (req, res) => {
 app.get("/prescriptions/:id", async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return res.status(400).json({ error: "ID inválido" });
-  const p = await Prescription.findById(id).lean();
+  const p = await Prescription.findOne({ _id: id }).lean();
   if (!p) return res.status(404).json({ error: "No encontrado" });
   res.json(p);
 });
 
-// Crear receta y descontar stock
+// Crear en la misma colección y descontar stock (pharmacy_medicamentos)
 app.post("/prescriptions", async (req, res) => {
   try {
     const { paciente_id, medico_id, items, notas } = req.body ?? {};
     if (!paciente_id || !medico_id || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "paciente_id, medico_id e items son obligatorios" });
     }
-    // Validar que todas las medicinas existan y haya stock suficiente
-    const ids = items.map((it) => it.medicina_id).filter((x) => isValidObjectId(x));
-    if (ids.length !== items.length) return res.status(400).json({ error: "Algún medicina_id es inválido" });
+    // Validar medicinas
+    const ids = items.map((it) => it.medicina_id);
+    if (!ids.every(isValidObjectId)) return res.status(400).json({ error: "Algún medicina_id es inválido" });
 
     const meds = await Medicine.find({ _id: { $in: ids } }).select({ _id: 1, stock: 1, nombre: 1 }).lean();
     const byId = new Map(meds.map((m) => [String(m._id), m]));
@@ -213,17 +224,15 @@ app.post("/prescriptions", async (req, res) => {
       if (m.stock < it.cantidad) return res.status(409).json({ error: `Stock insuficiente para ${m.nombre}` });
     }
 
-    // Descontar stock (bulk) — nota: no transaccional multi-doc; para garantías fuertes usar transacciones
-    const ops = items.map((it) => ({
+    // Descuento de stock (en la misma colección sobre __kind=pharmacy_medicamentos)
+    const bulkOps = items.map((it) => ({
       updateOne: {
-        filter: { _id: new mongoose.Types.ObjectId(it.medicina_id), stock: { $gte: it.cantidad } },
+        filter: { _id: new mongoose.Types.ObjectId(it.medicina_id), [discriminatorKey]: "pharmacy_medicamentos", stock: { $gte: it.cantidad } },
         update: { $inc: { stock: -it.cantidad } },
       },
     }));
-    const bulk = await Medicine.bulkWrite(ops, { ordered: true });
-    if (bulk.result?.nModified === 0 && bulk.modifiedCount === 0) {
-      return res.status(409).json({ error: "No se pudo descontar stock (condición falló)" });
-    }
+    const bulk = await Item.bulkWrite(bulkOps, { ordered: true });
+    if ((bulk.modifiedCount || 0) === 0) return res.status(409).json({ error: "No se pudo descontar stock" });
 
     const presc = await Prescription.create({
       paciente_id: Number(paciente_id),
@@ -242,4 +251,4 @@ const publicDir = path.join(__dirname, "../public");
 app.use(express.static(publicDir));
 app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
-app.listen(PORT, () => console.log(`✅ ${SERVICE} escuchando en http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`✅ ${SERVICE} usando colección '${COLL}' en http://localhost:${PORT}`));
