@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, getApiBase, setApiBase } from "./api";
+import {
+  api,
+  getApiBase, setApiBase,
+  getPatientsBase, setPatientsBase,
+  getDoctorsBase,  setDoctorsBase,
+  extGet
+} from "./api";
 
 /* ===== Helpers de fecha ===== */
 function isoToLocalInput(iso) {
@@ -13,31 +19,20 @@ function localInputToIso(s) {
   const d = new Date(s);
   return isNaN(d) ? null : d.toISOString();
 }
-
-/* ===== Config cross-service (Pacientes y Doctores) ===== */
-const LS_PATIENTS = "patients_api_base";
-const LS_DOCTORS = "doctors_api_base";
-
-function getPatientsBase() {
-  return localStorage.getItem(LS_PATIENTS) || import.meta.env.VITE_PATIENTS_API_BASE || "/";
-}
-function setPatientsBase(v) {
-  localStorage.setItem(LS_PATIENTS, v);
-}
-function getDoctorsBase() {
-  return localStorage.getItem(LS_DOCTORS) || import.meta.env.VITE_DOCTORS_API_BASE || "/";
-}
-function setDoctorsBase(v) {
-  localStorage.setItem(LS_DOCTORS, v);
-}
-async function extGet(base, path) {
-  const url = new URL(path, base).toString();
-  const resp = await fetch(url, { headers: { "Content-Type": "application/json" } });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
+function fmtDateTime(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(d);
+  } catch {
+    return iso;
+  }
 }
 
-/* ===== Hooks de datos del propio servicio ===== */
+/* ===== Hook de citas (propio servicio) ===== */
 function useAppointments() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -73,9 +68,9 @@ function useAppointments() {
   return { items, loading, error, load, create, update, remove };
 }
 
-/* ===== Hooks de catálogos externos ===== */
-function useRoster(baseGetter, path, labelFn) {
-  const [base, setBase] = useState(baseGetter());
+/* ===== Hooks de catálogos externos (Pacientes/Doctores) ===== */
+function useRoster(getBase, setBase) {
+  const [base, setBaseState] = useState(getBase());
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -84,13 +79,16 @@ function useRoster(baseGetter, path, labelFn) {
     if (!base) return;
     setBusy(true); setErr("");
     try {
+      const path = base.includes("patients") ? "/patients" : "/doctors";
       const data = await extGet(base, path);
-      // normaliza {id, label}
       const mapped = (data || []).map((x) => ({
         id: x.id,
-        label: labelFn(x),
+        nombre: x.nombre_completo || x.name || "",
+        correo: x.correo || x.email || "",
+        especialidad: x.especialidad || "",
       }));
       setItems(mapped);
+      setBase(base); // persistir en LS
     } catch (e) {
       setErr(e.message || "Error cargando");
       setItems([]);
@@ -99,21 +97,18 @@ function useRoster(baseGetter, path, labelFn) {
     }
   };
 
-  return { base, setBase, items, busy, err, load };
+  return { base, setBase: setBaseState, items, busy, err, load };
 }
 
-function doctorLabel(d) {
-  // id + nombre + (especialidad)
-  return [d.id, d.nombre_completo, d.especialidad ? `(${d.especialidad})` : ""].filter(Boolean).join(" — ");
+function labelPaciente(p) {
+  return [p.id, p.nombre, p.correo ? `(${p.correo})` : ""].filter(Boolean).join(" — ");
 }
-function patientLabel(p) {
-  // id + nombre (muestra correo/identificación si existe)
-  const extra = p.correo || p.identificacion || p.documento || "";
-  return [p.id, p.nombre_completo, extra ? `(${extra})` : ""].filter(Boolean).join(" — ");
+function labelMedico(d) {
+  return [d.id, d.nombre, d.especialidad ? `(${d.especialidad})` : ""].filter(Boolean).join(" — ");
 }
 
-/* ===== Fila editable ===== */
-function Row({ item, onUpdate, onDelete }) {
+/* ===== Fila editable del listado ===== */
+function Row({ item, onUpdate, onDelete, patientMap, doctorMap }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     paciente_id: item.paciente_id,
@@ -166,17 +161,26 @@ function Row({ item, onUpdate, onDelete }) {
     }
   };
 
+  const p = patientMap.get(item.paciente_id);
+  const d = doctorMap.get(item.medico_id);
+
   return (
     <tr>
-      <td>{item.id}</td>
-      <td>{item.paciente_id}</td>
-      <td>{item.medico_id}</td>
-      <td>{editing ? <input className="row-edit-input" type="datetime-local" value={form.inicio} onChange={set("inicio")} aria-invalid={!!errors.inicio}/> : isoToLocalInput(item.inicio)}</td>
-      <td>{editing ? <input className="row-edit-input" type="datetime-local" value={form.fin} onChange={set("fin")} aria-invalid={!!errors.fin}/> : isoToLocalInput(item.fin)}</td>
-      <td>{editing ? <input className="row-edit-input" value={form.motivo} onChange={set("motivo")}/> : (item.motivo || "")}</td>
+      <td className="mono">{item.id}</td>
+      <td>
+        <div className="cell-title">{p?.nombre || `Paciente #${item.paciente_id}`}</div>
+        <div className="cell-sub">{p?.correo || ""}</div>
+      </td>
+      <td>
+        <div className="cell-title">{d?.nombre || `Médico #${item.medico_id}`}</div>
+        <div className="cell-sub">{d?.especialidad || ""}</div>
+      </td>
+      <td>{editing ? <input className="row-edit-input" type="datetime-local" value={form.inicio} onChange={set("inicio")} aria-invalid={!!errors.inicio}/> : fmtDateTime(item.inicio)}</td>
+      <td>{editing ? <input className="row-edit-input" type="datetime-local" value={form.fin} onChange={set("fin")} aria-invalid={!!errors.fin}/> : fmtDateTime(item.fin)}</td>
+      <td>{editing ? <input className="row-edit-input" value={form.motivo} onChange={set("motivo")}/> : (item.motivo || "—")}</td>
       <td>
         {editing ? (
-          <div className="pretty-select">
+          <div className="pretty-select compact">
             <select className="row-edit-input" value={form.estado} onChange={set("estado")}>
               <option value="programada">programada</option>
               <option value="reprogramada">reprogramada</option>
@@ -185,7 +189,7 @@ function Row({ item, onUpdate, onDelete }) {
             </select>
           </div>
         ) : (
-          item.estado
+          <span className={`badge ${item.estado}`}>{item.estado}</span>
         )}
       </td>
       <td className="row-actions">
@@ -209,25 +213,30 @@ function Row({ item, onUpdate, onDelete }) {
 export default function App() {
   const { items, loading, error, load, create, update, remove } = useAppointments();
 
-  // Config API bases
+  // Bases de APIs
   const [apiBase, setApiBaseState] = useState(getApiBase());
-  const [patientsBase, setPatientsBaseState] = useState(getPatientsBase());
-  const [doctorsBase, setDoctorsBaseState] = useState(getDoctorsBase());
+  const patients = useRoster(getPatientsBase, setPatientsBase);
+  const doctors  = useRoster(getDoctorsBase,  setDoctorsBase);
 
-  // Catálogos
-  const patients = useRoster(getPatientsBase, "/patients", patientLabel);
-  const doctors = useRoster(getDoctorsBase, "/doctors", doctorLabel);
+  // Cargar datos
+  useEffect(() => { load(); }, []);
+  useEffect(() => { patients.load(); }, [patients.base]);
+  useEffect(() => { doctors.load();  }, [doctors.base]);
 
-  // Listado citas
+  // Maps para resolver nombres en tabla
+  const patientMap = useMemo(
+    () => new Map(patients.items.map(p => [p.id, p])),
+    [patients.items]
+  );
+  const doctorMap = useMemo(
+    () => new Map(doctors.items.map(d => [d.id, d])),
+    [doctors.items]
+  );
+
+  // Filtros del listado
   const [query, setQuery] = useState({ paciente_id: "", medico_id: "", estado: "", from: "", to: "" });
   const [deb, setDeb] = useState(query);
   useEffect(() => { const t = setTimeout(() => setDeb(query), 250); return () => clearTimeout(t); }, [query]);
-
-  useEffect(() => { load(); }, []);
-  useEffect(() => { patients.setBase(patientsBase); }, [patientsBase]);
-  useEffect(() => { doctors.setBase(doctorsBase); }, [doctorsBase]);
-  useEffect(() => { patients.load(); }, [patients.base]); // carga cuando cambia base
-  useEffect(() => { doctors.load(); }, [doctors.base]);
 
   const filtered = useMemo(() => {
     const f = (arr) => arr
@@ -247,15 +256,15 @@ export default function App() {
   const [errors, setErrors] = useState({});
   const setF = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
-  const onSaveBase = () => {
+  const onSaveBases = () => {
     try {
       const u1 = new URL(apiBase, window.location.origin);
-      const u2 = new URL(patientsBase, window.location.origin);
-      const u3 = new URL(doctorsBase, window.location.origin);
+      const u2 = new URL(patients.base, window.location.origin);
+      const u3 = new URL(doctors.base, window.location.origin);
       if (![u1,u2,u3].every((u) => u.protocol.startsWith("http"))) throw new Error();
       setApiBase(apiBase);
-      setPatientsBase(patientsBase);
-      setDoctorsBase(doctorsBase);
+      setPatientsBase(patients.base);
+      setDoctorsBase(doctors.base);
       alert("Bases guardadas");
     } catch { alert("Alguna URL es inválida"); }
   };
@@ -308,23 +317,23 @@ export default function App() {
           </div>
           <div className="row">
             <label htmlFor="patientsBase">Pacientes API</label>
-            <input id="patientsBase" value={patientsBase} onChange={(e) => setPatientsBaseState(e.target.value)} placeholder="https://patients-..." />
+            <input id="patientsBase" value={patients.base} onChange={(e) => patients.setBase(e.target.value)} placeholder="https://patients-..." />
             <button className="secondary" onClick={patients.load} disabled={patients.busy}>Cargar</button>
           </div>
           <div className="row">
             <label htmlFor="doctorsBase">Doctores API</label>
-            <input id="doctorsBase" value={doctorsBase} onChange={(e) => setDoctorsBaseState(e.target.value)} placeholder="https://doctors-..." />
+            <input id="doctorsBase" value={doctors.base} onChange={(e) => doctors.setBase(e.target.value)} placeholder="https://doctors-..." />
             <button className="secondary" onClick={doctors.load} disabled={doctors.busy}>Cargar</button>
           </div>
-          <button onClick={onSaveBase}>Guardar bases</button>
+          <button onClick={onSaveBases}>Guardar bases</button>
         </div>
       </header>
 
       <main>
+        {/* Programar nueva cita */}
         <section className="card">
           <h2>Programar cita</h2>
           <form onSubmit={onCreate} className="grid-form">
-            {/* Paciente */}
             <div className="form-row">
               <label>Paciente</label>
               <div className="pretty-select">
@@ -335,7 +344,7 @@ export default function App() {
                 >
                   <option value="">{patients.busy ? "Cargando..." : "Seleccione un paciente"}</option>
                   {patients.items.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
+                    <option key={p.id} value={p.id}>{labelPaciente(p)}</option>
                   ))}
                 </select>
               </div>
@@ -343,7 +352,6 @@ export default function App() {
               {patients.err && <small className="field-error">Pacientes: {patients.err}</small>}
             </div>
 
-            {/* Médico */}
             <div className="form-row">
               <label>Médico</label>
               <div className="pretty-select">
@@ -354,7 +362,7 @@ export default function App() {
                 >
                   <option value="">{doctors.busy ? "Cargando..." : "Seleccione un médico"}</option>
                   {doctors.items.map((d) => (
-                    <option key={d.id} value={d.id}>{d.label}</option>
+                    <option key={d.id} value={d.id}>{labelMedico(d)}</option>
                   ))}
                 </select>
               </div>
@@ -395,6 +403,7 @@ export default function App() {
           </form>
         </section>
 
+        {/* Listado */}
         <section className="card">
           <div className="list-header">
             <h2>Listado</h2>
@@ -405,10 +414,41 @@ export default function App() {
           </div>
 
           <div className="list-tools">
-            <input className="search-input" placeholder="Filtrar por paciente_id" value={query.paciente_id} onChange={(e) => setQuery((s) => ({ ...s, paciente_id: e.target.value }))} />
-            <input className="search-input" placeholder="Filtrar por medico_id" value={query.medico_id} onChange={(e) => setQuery((s) => ({ ...s, medico_id: e.target.value }))} />
             <div className="pretty-select">
-              <select className="search-input" value={query.estado} onChange={(e) => setQuery((s) => ({ ...s, estado: e.target.value }))}>
+              <select
+                className="search-input"
+                value={query.paciente_id}
+                onChange={(e) => setQuery((s) => ({ ...s, paciente_id: e.target.value }))}
+                title="Filtrar por paciente"
+              >
+                <option value="">(Paciente)</option>
+                {patients.items.map((p) => (
+                  <option key={p.id} value={p.id}>{labelPaciente(p)}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="pretty-select">
+              <select
+                className="search-input"
+                value={query.medico_id}
+                onChange={(e) => setQuery((s) => ({ ...s, medico_id: e.target.value }))}
+                title="Filtrar por médico"
+              >
+                <option value="">(Médico)</option>
+                {doctors.items.map((d) => (
+                  <option key={d.id} value={d.id}>{labelMedico(d)}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="pretty-select">
+              <select
+                className="search-input"
+                value={query.estado}
+                onChange={(e) => setQuery((s) => ({ ...s, estado: e.target.value }))}
+                title="Estado"
+              >
                 <option value="">(estado)</option>
                 <option value="programada">programada</option>
                 <option value="reprogramada">reprogramada</option>
@@ -416,22 +456,24 @@ export default function App() {
                 <option value="hecha">hecha</option>
               </select>
             </div>
+
             <input className="search-input" type="datetime-local" value={query.from} onChange={(e) => setQuery((s) => ({ ...s, from: e.target.value }))} title="Desde" />
-            <input className="search-input" type="datetime-local" value={query.to} onChange={(e) => setQuery((s) => ({ ...s, to: e.target.value }))} title="Hasta (exclusivo)" />
+            <input className="search-input" type="datetime-local" value={query.to} onChange={(e) => setQuery((s) => ({ ...s, to: e.target.value }))} title="Hasta (excl.)" />
           </div>
 
           {error && <div className="list-status error">Error: {error}</div>}
-          <table>
+
+          <table className="table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th className="w-min">ID</th>
                 <th>Paciente</th>
                 <th>Médico</th>
                 <th>Inicio</th>
                 <th>Fin</th>
                 <th>Motivo</th>
                 <th>Estado</th>
-                <th>Acciones</th>
+                <th className="w-min">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -439,7 +481,14 @@ export default function App() {
                 <tr><td colSpan={8}><div className="empty-state">Sin citas.</div></td></tr>
               ) : (
                 filtered.map((a) => (
-                  <Row key={a.id} item={a} onUpdate={update} onDelete={onDelete} />
+                  <Row
+                    key={a.id}
+                    item={a}
+                    onUpdate={update}
+                    onDelete={onDelete}
+                    patientMap={patientMap}
+                    doctorMap={doctorMap}
+                  />
                 ))
               )}
             </tbody>

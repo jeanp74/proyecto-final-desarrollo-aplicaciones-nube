@@ -329,3 +329,34 @@ footer {
   pointer-events: none;
   opacity: .7;
 }
+/* Header con inputs apilados */
+.api-config.stack .row { display: flex; gap: .5rem; align-items: center; margin-bottom: .4rem; }
+.api-config.stack label { min-width: 120px; opacity: .85; }
+
+/* Selects “bonitos” */
+.pretty-select { position: relative; width: 100%; }
+.pretty-select select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  width: 100%; padding-right: 2rem;
+}
+.pretty-select.compact select { padding-right: 1.75rem; }
+.pretty-select::after {
+  content: "▾"; position: absolute; right: .6rem; top: 50%;
+  transform: translateY(-50%); pointer-events: none; opacity: .7;
+}
+
+/* Tabla más legible tipo pacientes */
+.table th, .table td { vertical-align: middle; }
+.table .w-min { white-space: nowrap; width: 1%; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+/* Celdas con título y subtexto (correo/especialidad) */
+.cell-title { font-weight: 600; line-height: 1.2; }
+.cell-sub   { font-size: .85rem; opacity: .8; }
+
+/* Badges de estado */
+.badge { padding: .2rem .5rem; border-radius: .5rem; font-size: .85rem; display: inline-block; }
+.badge.programada   { background: rgba(59,130,246,.15); }
+.badge.reprogramada { background: rgba(234,179,8,.15); }
+.badge.cancelada    { background: rgba(239,68,68,.15); }
+.badge.hecha        { background: rgba(34,197,94,.15); }
