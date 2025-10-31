@@ -3,6 +3,7 @@ import cors from "cors";
 import { pool } from "./db.js";
 import path from "path";
 import { fileURLToPath } from "url";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -10,222 +11,131 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// app.use(express.static(__dirname));
+const PORT = process.env.PORT || 4004;
+const SERVICE = process.env.SERVICE_NAME || "doctors-api";
 
-const PORT = process.env.PORT || 4001;
-
-// app.get("/", async (_req, res) => {
-//   res.sendFile(path.join(__dirname, "index.html"));
-// });
-
-const publicDir = path.join(__dirname, "../public");
-app.use(express.static(publicDir));
-
-// Listado de métodos y rutas
-app.get("/api", async (_req, res) => {
-  // res.json({
-  //   metodos: {
-  //     GET: [
-  //       {url: "/db/health", hace: "Health DB"},
-  //       {url: "/users", hace: "Listar (SELECT real)"},
-  //       {url: "/users/:id", hace: "Obtener usuarios por id"},
-  //       {url: "/tables", hace: "Listar tablas de base de datos"},
-  //       {url: "/health", hace: "Mantén /health si ya lo tenías"}
-  //     ],
-  //     POST: [
-  //       {url: "/users", hace: "Crear usuario (name & email son obligatorios)"}
-  //     ],
-  //     PUT: [
-  //       {url: "/users/:id", hace: "Actualizar usuario (name & email son obligatorios)"},
-  //       {url: "/tables", hace: "Reiniciar tabla"}
-  //     ],
-  //     DELETE: [
-  //       {url: "/users/:id", hace: "Eliminar usuarios por id"}
-  //     ]
-  //   }
-  // });
-
-  res.json({
-    metodos: {
-      GET: {
-        "/db/health": "Health DB*",
-        "/users": "Listar (SELECT real)",
-        "/users/:id": "Obtener usuarios por id",
-        "/tables": "Listar tablas de base de datos",
-        "/health": "Mantén /health si ya lo tenías"
-      },
-      POST: {
-        "/users": "Crear usuario (name & email son obligatorios)"
-      },
-      PUT: {
-        "/users/:id": "Actualizar usuario (name & email son obligatorios)",
-        "/tables": "Reiniciar tabla"
-      },
-      DELETE: {
-        "/users/:id": "Eliminar usuarios por id"
-      }
-    }
-  });
-
-});
-
-
-// Health DB
+/* ================ ENDPOINTS ================ */
+app.get("/health", (_req, res) => res.json({ status: "ok", service: SERVICE }));
 app.get("/db/health", async (_req, res) => {
   try {
     const r = await pool.query("SELECT 1 AS ok");
-    res.json({ ok: r.rows[0].ok === 1 });
+    res.json({ ok: r.rows[0]?.ok === 1 });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Listar (SELECT real)
-app.get("/users", async (_req, res) => {
-  try {
-    const r = await pool.query("SELECT id, name, email FROM users_schema.users ORDER BY id ASC");
-    res.status(200).json(r.rows);
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
-  }
+app.get("/api", (_req, res) => {
+  res.json({
+    GET: {
+      "/doctors": "Listar médicos",
+      "/doctors/:id": "Ver médico por id",
+      "/db/health": "Salud de la BD",
+      "/health": "Salud del servicio"
+    },
+    POST: { "/doctors": "Crear médico" },
+    PUT:  { "/doctors/:id": "Actualizar médico" },
+    DELETE: { "/doctors/:id": "Eliminar médico" }
+  });
 });
 
-// Obtener usuarios por id
-app.get("/users/:id", async (req, res) => {
+// Listar
+app.get("/doctors", async (_req, res) => {
   try {
     const r = await pool.query(
-      "SELECT id, name, email FROM users_schema.users WHERE id=$1",
-      [req.params.id]
+      `SELECT id, nombre_completo, especialidad, correo, telefono, activo
+       FROM doctors_schema.medicos
+       ORDER BY id ASC`
     );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
-    }
+    res.json(r.rows);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error listando médicos", detail: String(e) });
   }
 });
 
-
-// Listar tablas de base de datos
-app.get("/tables", async (_req, res) => {
+// Obtener 1
+app.get("/doctors/:id", async (req, res) => {
   try {
-    const r = await pool.query("SELECT * FROM multiapisdb.information_schema.tables");
-    res.status(200).json(r.rows);
+    const r = await pool.query(
+      `SELECT id, nombre_completo, especialidad, correo, telefono, activo
+       FROM doctors_schema.medicos WHERE id=$1`,
+      [Number(req.params.id)]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Médico no encontrado" });
+    res.json(r.rows[0]);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error consultando médico", detail: String(e) });
   }
 });
 
-// Mantén /health si ya lo tenías
-app.get("/health", (_req, res) => res.json({ status: "ok", service: "users-api" }));
-
-
-// Crear usuario 
-app.post("/users", async (req, res) => {
-
-  let errores = [];
-  if (req.body.length != undefined) {
-    for (let x = 0; x < req.body.length; x++) {
-      const { name, email } = req.body[x] ?? {};
-      if (!name || !email) errores.push({ error: "name & email son obligatorios para " + (x + 1) });
-      // if (!name || !email) return res.status(400).json({ error: "name & email required" });
-    }
-
-    if (errores.length > 0) return res.status(400).json(errores);
-    // let resultado = { "201": [] };
-    let resultado = {};
-    resultado["201"] = [];
-    try {
-      for (let x = 0; x < req.body.length; x++) {
-        console.log(req.body[x]);
-        const { name, email } = req.body[x] ?? {};
-
-        const r = await pool.query(
-          "INSERT INTO users_schema.users(name, email) VALUES($1, $2) RETURNING id, name, email",
-          [name, email]
-        );
-        resultado['201'].push(r.rows);
-        // res.status(201).json(r.rows);
-        // res.json(r);
-      }
-      res.status(201).json(resultado);
-    } catch (e) {
-      return res.status(500).json({ error: "error creando usuario", detail: String(e) });
-    }
-  } else {
-    const { name, email } = req.body ?? {};
-    if (!name || !email) return res.status(400).json({ error: "name & email required" });
-
-    try {
-      const r = await pool.query(
-        "INSERT INTO users_schema.users(name, email) VALUES($1, $2) RETURNING id, name, email",
-        [name, email]
-      );
-      res.status(201).json(r.rows);
-      // res.json(r);
-    } catch (e) {
-      res.status(500).json({ error: "error creando usuario", detail: String(e) });
-    }
+// Crear
+app.post("/doctors", async (req, res) => {
+  const { nombre_completo, especialidad, correo, telefono = null, activo = true } = req.body ?? {};
+  if (!nombre_completo || !especialidad) {
+    return res.status(400).json({ error: "nombre_completo y especialidad son obligatorios" });
   }
-
-});
-
-
-// Actualizar usuario 
-app.put("/users/:id", async (req, res) => {
-  const { name, email } = req.body ?? {};
-  if (!name || !email) return res.status(400).json({ error: "name & email required" });
 
   try {
     const r = await pool.query(
-      "UPDATE users_schema.users SET name=$1, email=$2 WHERE id=$3 RETURNING id, name, email",
-      [name, email, req.params.id]
+      `INSERT INTO doctors_schema.medicos
+       (nombre_completo, especialidad, correo, telefono, activo)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, nombre_completo, especialidad, correo, telefono, activo`,
+      [nombre_completo, especialidad, correo ?? null, telefono, !!activo]
     );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Correo o licencia ya registrado", detail: e.detail || String(e) });
     }
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error creando médico", detail: String(e) });
   }
 });
 
-// Reiniciar tabla
-app.put("/tables", async (req, res) => {
-  try {
-    const r = await pool.query("TRUNCATE TABLE users_schema.users RESTART IDENTITY");
-    res.status(200).json({ mensaje: "Tabla reiniciada" });
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
-  }
-});
+// Actualizar (parcial)
+app.put("/doctors/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { nombre_completo = null, especialidad = null, correo = null, telefono = null, activo = null } = req.body ?? {};
 
-
-// Eliminar usuarios por id
-app.delete("/users/:id", async (req, res) => {
   try {
     const r = await pool.query(
-      "DELETE FROM users_schema.users WHERE id=$1 RETURNING id, name, email",
-      [req.params.id]
+      `UPDATE doctors_schema.medicos SET
+         nombre_completo = COALESCE($2, nombre_completo),
+         especialidad    = COALESCE($3, especialidad),
+         correo          = COALESCE($4, correo),
+         telefono        = COALESCE($5, telefono),
+         activo          = COALESCE($6, activo)
+       WHERE id = $1
+       RETURNING id, nombre_completo, especialidad, correo, telefono, activo`,
+      [id, nombre_completo, especialidad, correo, telefono, activo]
     );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
-    }
+    if (r.rowCount === 0) return res.status(404).json({ error: "Médico no encontrado" });
+    res.json(r.rows[0]);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Correo o licencia ya registrado", detail: e.detail || String(e) });
+    }
+    res.status(500).json({ error: "Error actualizando médico", detail: String(e) });
   }
 });
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(publicDir, "index.html"));
+// Eliminar
+app.delete("/doctors/:id", async (req, res) => {
+  try {
+    const r = await pool.query(
+      "DELETE FROM doctors_schema.medicos WHERE id=$1 RETURNING id",
+      [Number(req.params.id)]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Médico no encontrado" });
+    res.json({ message: "Médico eliminado", id: r.rows[0].id });
+  } catch (e) {
+    res.status(500).json({ error: "Error eliminando médico", detail: String(e) });
+  }
 });
 
-app.listen(PORT, () => console.log(`✅ users-api on http://localhost:${PORT}`));
+/* ===== STATIC + SPA FALLBACK ===== */
+const publicDir = path.join(__dirname, "../public");
+app.use(express.static(publicDir));
+app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+
+app.listen(PORT, () => console.log(`✅ ${SERVICE} en http://localhost:${PORT}`));

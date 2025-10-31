@@ -2,7 +2,7 @@ const STORAGE_KEY = 'patients_api_base';
 
 export function getApiBase() {
   // Por defecto, mismo origen (el propio contenedor sirve front+API)
-  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_API_BASE || '/';
+  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_API_BASE || 'https://patients-proyecto-final-desarrollo-dvdpe0eegng6atfy.brazilsouth-01.azurewebsites.net/';
 }
 
 export function setApiBase(v) {

@@ -1,6 +1,11 @@
+// Conexión a PostgreSQL (Azure PG requiere TLS)
 import pg from "pg";
+const { Pool } = pg;
 
-export const pool = new pg.Pool({
-  connectionString: process.env.USERS_DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // Azure PG exige TLS; para demo deshabilitamos validación de CA
+const connectionString =
+  process.env.APPOINTMENTS_DATABASE_URL;
+
+export const pool = new Pool({
+  connectionString,
+  ssl: { rejectUnauthorized: false },
 });

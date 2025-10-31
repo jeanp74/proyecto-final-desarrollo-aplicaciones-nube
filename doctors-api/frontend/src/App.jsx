@@ -1,101 +1,113 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, getApiBase, setApiBase } from './api'
+import { useEffect, useMemo, useState } from "react";
+import { api, getApiBase, setApiBase } from "./api";
 
-function useUsers() {
-  const [users, setUsers] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+/* ========== Data hook ========== */
+function useDoctors() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const load = async () => {
-    setLoading(true)
-    setError('')
+    setLoading(true); setError("");
     try {
-      const data = await api('/users')
-      setUsers(data)
+      const data = await api("/doctors");
+      setItems(data);
     } catch (e) {
-      setError(e.message)
+      setError(e.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const create = async (payload) => {
-    const u = await api('/users', { method: 'POST', body: JSON.stringify(payload) })
-    setUsers((prev) => [...prev, u])
-  }
+    const d = await api("/doctors", { method: "POST", body: JSON.stringify(payload) });
+    setItems((prev) => [...prev, d]);
+  };
 
   const update = async (id, payload) => {
-    const u = await api(`/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
-    setUsers((prev) => prev.map((x) => (x.id === id ? u : x)))
-  }
+    const d = await api(`/doctors/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+    setItems((prev) => prev.map((x) => (x.id === id ? d : x)));
+  };
 
   const remove = async (id) => {
-    await api(`/users/${id}`, { method: 'DELETE' })
-    setUsers((prev) => prev.filter((x) => x.id !== id))
-  }
+    await api(`/doctors/${id}`, { method: "DELETE" });
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  };
 
-  return { users, loading, error, load, create, update, remove }
+  return { items, loading, error, load, create, update, remove };
 }
 
-function Row({ user, users, onUpdate, onDelete }) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(user.name)
-  const [email, setEmail] = useState(user.email)
-  const [saving, setSaving] = useState(false)
-  const [errors, setErrors] = useState({ name: '', email: '' })
+/* ========== Row editable ========== */
+function Row({ item, all, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(item);
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
 
-  useEffect(() => {
-    setName(user.name)
-    setEmail(user.email)
-  }, [user])
+  useEffect(() => setForm(item), [item]);
+
+  const set = (k) => (e) =>
+    setForm((s) => ({ ...s, [k]: k === "activo" ? e.target.checked : e.target.value }));
 
   const onSave = async () => {
-    const newErrors = { name: '', email: '' }
-    const n = name.trim()
-    const m = email.trim()
-    if (!n) newErrors.name = 'Nombre requerido'
-    if (!/.+@.+\..+/.test(m)) newErrors.email = 'Email inválido'
-    setErrors(newErrors)
-    if (newErrors.name || newErrors.email) return
-    // unique email client-side check against other users
-    const dup = users.some((u) => u.id !== user.id && u.email.toLowerCase() === m.toLowerCase())
-    if (dup) {
-      setErrors({ ...newErrors, email: 'Email ya registrado' })
-      return
-    }
-    setSaving(true)
+    const f = {
+      nombre_completo: (form.nombre_completo || "").trim(),
+      especialidad: (form.especialidad || "").trim(),
+      correo: (form.correo || "").trim(),
+      telefono: (form.telefono || "").trim(),
+      activo: !!form.activo,
+    };
+    const e = {};
+    if (!f.nombre_completo) e.nombre_completo = "Requerido";
+    if (!f.especialidad) e.especialidad = "Requerido";
+    if (f.correo && !/.+@.+\..+/.test(f.correo)) e.correo = "Email inválido";
+    const dupMail =
+      f.correo &&
+      all.some((x) => x.id !== item.id && (x.correo || "").toLowerCase() === f.correo.toLowerCase());
+    if (!e.correo && dupMail) e.correo = "Correo ya registrado";
+
+    setErrors(e);
+    if (Object.keys(e).length) return;
+
+    setSaving(true);
     try {
-      await onUpdate(user.id, { name: n, email: m })
-      setEditing(false)
-    } catch (e) {
-      // Error shown by parent via toast
+      await onUpdate(item.id, f);
+      setEditing(false);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   return (
     <tr>
-      <td>{user.id}</td>
+      <td>{item.id}</td>
       <td>
         {editing ? (
-          <div className="field-with-error">
-            <input className="row-edit-input" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!errors.name} />
-            {errors.name && <small className="field-error">{errors.name}</small>}
-          </div>
+          <input className="row-edit-input" value={form.nombre_completo || ""} onChange={set("nombre_completo")} aria-invalid={!!errors.nombre_completo} />
         ) : (
-          <span>{user.name}</span>
+          item.nombre_completo
         )}
+        {editing && errors.nombre_completo && <small className="field-error">{errors.nombre_completo}</small>}
       </td>
       <td>
         {editing ? (
-          <div className="field-with-error">
-            <input className="row-edit-input" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!errors.email} />
-            {errors.email && <small className="field-error">{errors.email}</small>}
-          </div>
+          <input className="row-edit-input" value={form.especialidad || ""} onChange={set("especialidad")} aria-invalid={!!errors.especialidad} />
         ) : (
-          <span>{user.email}</span>
+          item.especialidad
         )}
+        {editing && errors.especialidad && <small className="field-error">{errors.especialidad}</small>}
+      </td>
+      <td>
+        {editing ? (
+          <input className="row-edit-input" value={form.correo || ""} onChange={set("correo")} aria-invalid={!!errors.correo} />
+        ) : (
+          item.correo || ""
+        )}
+        {editing && errors.correo && <small className="field-error">{errors.correo}</small>}
+      </td>
+      <td>{editing ? <input className="row-edit-input" value={form.telefono || ""} onChange={set("telefono")} /> : item.telefono || ""}</td>
+      <td className="center">
+        {editing ? <input type="checkbox" checked={!!form.activo} onChange={set("activo")} /> : item.activo ? "Sí" : "No"}
       </td>
       <td className="row-actions">
         {editing ? (
@@ -106,176 +118,155 @@ function Row({ user, users, onUpdate, onDelete }) {
         ) : (
           <>
             <button className="secondary" onClick={() => setEditing(true)}>Editar</button>
-            <button className="danger" onClick={() => onDelete(user.id)}>Eliminar</button>
+            <button className="danger" onClick={() => onDelete(item.id)}>Eliminar</button>
           </>
         )}
       </td>
     </tr>
-  )
+  );
 }
 
+/* ========== App ========== */
 export default function App() {
-  const { users, loading, error, load, create, update, remove } = useUsers()
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [formErrors, setFormErrors] = useState({ name: '', email: '' })
+  const { items, loading, error, load, create, update, remove } = useDoctors();
+  const [apiBase, setApiBaseState] = useState(getApiBase());
+  const [query, setQuery] = useState("");
+  const [qDeb, setQDeb] = useState("");
+  useEffect(() => { const t = setTimeout(() => setQDeb(query.trim().toLowerCase()), 250); return () => clearTimeout(t); }, [query]);
+  useEffect(() => { load(); }, []);
 
-  // Search
-  const [query, setQuery] = useState('')
-  const [qDebounced, setQDebounced] = useState('')
-  useEffect(() => {
-    const id = setTimeout(() => setQDebounced(query.trim().toLowerCase()), 250)
-    return () => clearTimeout(id)
-  }, [query])
   const filtered = useMemo(() => {
-    if (!qDebounced) return users
-    return users.filter((u) =>
-      String(u.name || '').toLowerCase().includes(qDebounced) ||
-      String(u.email || '').toLowerCase().includes(qDebounced)
-    )
-  }, [users, qDebounced])
+    if (!qDeb) return items;
+    return items.filter((d) =>
+      [d.nombre_completo, d.especialidad, d.correo, d.telefono]
+        .some((v) => String(v || "").toLowerCase().includes(qDeb))
+    );
+  }, [items, qDeb]);
 
-  const [apiBase, setApiBaseState] = useState(getApiBase())
-  const apiLabel = useMemo(() => apiBase, [apiBase])
-
-  // Simple toast system
-  const [toasts, setToasts] = useState([])
-  const notify = (message, type = 'info') => {
-    const id = Math.random().toString(36).slice(2)
-    setToasts((t) => [...t, { id, message, type }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500)
-  }
-
-  useEffect(() => { load() }, [])
-
-  const onCreate = async (e) => {
-    e.preventDefault()
-    const n = name.trim()
-    const m = email.trim()
-    const errs = { name: '', email: '' }
-    if (!n) errs.name = 'Nombre requerido'
-    if (!/.+@.+\..+/.test(m)) errs.email = 'Email inválido'
-    // unique email client-side check
-    if (!errs.email && users.some((u) => u.email.toLowerCase() === m.toLowerCase())) errs.email = 'Email ya registrado'
-    setFormErrors(errs)
-    if (errs.name || errs.email) return
-    setCreating(true)
-    try {
-      await create({ name: n, email: m })
-      setName('')
-      setEmail('')
-      setFormErrors({ name: '', email: '' })
-      notify('Usuario creado', 'success')
-    } catch (e) {
-      notify('Error creando: ' + e.message, 'error')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const onDelete = async (id) => {
-    if (!confirm(`Eliminar usuario #${id}?`)) return
-    try {
-      await remove(id)
-      notify('Usuario eliminado', 'success')
-    } catch (e) {
-      notify('Error eliminando: ' + e.message, 'error')
-    }
-  }
-
-  const updateWithNotify = async (id, payload) => {
-    try {
-      await update(id, payload)
-      notify('Usuario actualizado', 'success')
-    } catch (e) {
-      notify('Error actualizando: ' + e.message, 'error')
-      throw e
-    }
-  }
+  const [form, setForm] = useState({ nombre_completo: "", especialidad: "", correo: "", telefono: "", activo: true });
+  const [creating, setCreating] = useState(false);
+  const [errors, setErrors] = useState({});
+  const set = (k) => (e) => setForm((s) => ({ ...s, [k]: k === "activo" ? e.target.checked : e.target.value }));
 
   const onSaveBase = () => {
     try {
-      const u = new URL(apiBase)
-      if (!u.protocol.startsWith('http')) throw new Error('')
-      setApiBase(apiBase)
-      setApiBaseState(apiBase)
-      alert('API Base guardada')
-    } catch {
-      alert('URL inválida')
+      const u = new URL(apiBase, window.location.origin);
+      if (!u.protocol.startsWith("http")) throw new Error();
+      setApiBase(apiBase);
+      alert("API Base guardada");
+    } catch { alert("URL inválida"); }
+  };
+
+  const onCreate = async (e) => {
+    e.preventDefault();
+    const f = {
+      nombre_completo: form.nombre_completo.trim(),
+      especialidad: form.especialidad.trim(),
+      correo: form.correo.trim(),
+      telefono: form.telefono.trim() || undefined,
+      activo: !!form.activo,
+    };
+    const er = {};
+    if (!f.nombre_completo) er.nombre_completo = "Requerido";
+    if (!f.especialidad) er.especialidad = "Requerido";
+    if (f.correo && !/.+@.+\..+/.test(f.correo)) er.correo = "Email inválido";
+    if (f.correo && items.some((x) => (x.correo || "").toLowerCase() === f.correo.toLowerCase())) er.correo = "Correo ya registrado";
+    setErrors(er);
+    if (Object.keys(er).length) return;
+
+    setCreating(true);
+    try {
+      await create(f);
+      setForm({ nombre_completo: "", especialidad: "", correo: "", telefono: "", activo: true });
+      setErrors({});
+    } catch (e) {
+      alert("Error creando: " + e.message);
+    } finally {
+      setCreating(false);
     }
-  }
+  };
+
+  const onDelete = async (id) => {
+    if (!confirm(`Eliminar médico #${id}?`)) return;
+    try {
+      await remove(id);
+    } catch (e) {
+      alert("Error eliminando: " + e.message);
+    }
+  };
 
   return (
     <div className="container">
       <header>
-        <h1>Users React</h1>
+        <h1>Médicos</h1>
         <div className="api-config">
-          <label htmlFor="apiBase">API Base URL</label>
-          <input id="apiBase" value={apiBase} onChange={(e) => setApiBaseState(e.target.value)} />
+          <label htmlFor="apiBase">API Base</label>
+          <input id="apiBase" value={apiBase} onChange={(e) => setApiBaseState(e.target.value)} placeholder="/" />
           <button onClick={onSaveBase}>Guardar</button>
         </div>
       </header>
 
-      {/* Toasts */}
-      <div className="toast-container">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>
-        ))}
-      </div>
-
       <main>
         <section className="card">
-          <h2>Crear usuario</h2>
+          <h2>Registrar médico</h2>
           <form onSubmit={onCreate} className="grid-form">
             <div className="form-row">
-              <label htmlFor="name">Nombre</label>
-              <input id="name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!formErrors.name} />
-              {formErrors.name && <small className="field-error">{formErrors.name}</small>}
+              <label>Nombre completo</label>
+              <input value={form.nombre_completo} onChange={set("nombre_completo")} aria-invalid={!!errors.nombre_completo} />
+              {errors.nombre_completo && <small className="field-error">{errors.nombre_completo}</small>}
             </div>
             <div className="form-row">
-              <label htmlFor="email">Email</label>
-              <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!formErrors.email} />
-              {formErrors.email && <small className="field-error">{formErrors.email}</small>}
+              <label>Especialidad</label>
+              <input value={form.especialidad} onChange={set("especialidad")} aria-invalid={!!errors.especialidad} />
+              {errors.especialidad && <small className="field-error">{errors.especialidad}</small>}
             </div>
-            <button type="submit" disabled={creating}>{creating ? 'Creando...' : 'Crear'}</button>
+            <div className="form-row">
+              <label>Correo</label>
+              <input type="email" value={form.correo} onChange={set("correo")} aria-invalid={!!errors.correo} />
+              {errors.correo && <small className="field-error">{errors.correo}</small>}
+            </div>
+            <div className="form-row">
+              <label>Teléfono</label>
+              <input value={form.telefono} onChange={set("telefono")} />
+            </div>
+            <div className="form-row">
+              <label>Activo</label>
+              <input type="checkbox" checked={!!form.activo} onChange={set("activo")} />
+            </div>
+            <button type="submit" disabled={creating}>{creating ? "Creando..." : "Crear"}</button>
           </form>
         </section>
 
         <section className="card">
           <div className="list-header">
-            <h2>Usuarios</h2>
+            <h2>Listado</h2>
             <div className="right">
-              <small>API: {apiLabel}</small>
-              <button onClick={load} disabled={loading}>{loading ? 'Cargando...' : 'Actualizar'}</button>
+              <small>Registros: {filtered.length}</small>
+              <button onClick={load} disabled={loading}>{loading ? "Cargando..." : "Actualizar"}</button>
             </div>
           </div>
           <div className="list-tools">
-            <input
-              className="search-input"
-              placeholder="Buscar por nombre o email..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <small className="muted">{filtered.length} resultado(s)</small>
+            <input className="search-input" placeholder="Buscar por nombre, especialidad, correo..." value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           {error && <div className="list-status error">Error: {error}</div>}
-          {loading && <div className="list-status">Cargando...</div>}
-          <table id="usersTable">
+          <table>
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Nombre</th>
-                <th>Email</th>
+                <th>Nombre completo</th>
+                <th>Especialidad</th>
+                <th>Correo</th>
+                <th>Teléfono</th>
+                <th>Activo</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={4}><div className="empty-state">No hay usuarios todavía. Crea el primero ✨</div></td></tr>
+                <tr><td colSpan={7}><div className="empty-state">Sin médicos.</div></td></tr>
               ) : (
-                filtered.map((u) => (
-                  <Row key={u.id} user={u} users={users} onUpdate={updateWithNotify} onDelete={onDelete} />
+                filtered.map((d) => (
+                  <Row key={d.id} item={d} all={items} onUpdate={update} onDelete={onDelete} />
                 ))
               )}
             </tbody>
@@ -283,9 +274,7 @@ export default function App() {
         </section>
       </main>
 
-      <footer>
-        <small>users-react · conectado a users-api</small>
-      </footer>
+      <footer><small>doctors-react · conectado a doctors-api</small></footer>
     </div>
-  )
+  );
 }

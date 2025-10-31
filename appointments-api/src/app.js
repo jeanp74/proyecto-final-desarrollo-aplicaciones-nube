@@ -3,6 +3,7 @@ import cors from "cors";
 import { pool } from "./db.js";
 import path from "path";
 import { fileURLToPath } from "url";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -10,222 +11,180 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// app.use(express.static(__dirname));
+const PORT = process.env.PORT || 4002;
+const SERVICE = process.env.SERVICE_NAME || "appointments-api";
 
-const PORT = process.env.PORT || 4001;
+/* ====================== UTIL ====================== */
+function toIsoOrNull(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d) ? null : d.toISOString();
+}
 
-// app.get("/", async (_req, res) => {
-//   res.sendFile(path.join(__dirname, "index.html"));
-// });
-
-const publicDir = path.join(__dirname, "../public");
-app.use(express.static(publicDir));
-
-// Listado de métodos y rutas
-app.get("/api", async (_req, res) => {
-  // res.json({
-  //   metodos: {
-  //     GET: [
-  //       {url: "/db/health", hace: "Health DB"},
-  //       {url: "/users", hace: "Listar (SELECT real)"},
-  //       {url: "/users/:id", hace: "Obtener usuarios por id"},
-  //       {url: "/tables", hace: "Listar tablas de base de datos"},
-  //       {url: "/health", hace: "Mantén /health si ya lo tenías"}
-  //     ],
-  //     POST: [
-  //       {url: "/users", hace: "Crear usuario (name & email son obligatorios)"}
-  //     ],
-  //     PUT: [
-  //       {url: "/users/:id", hace: "Actualizar usuario (name & email son obligatorios)"},
-  //       {url: "/tables", hace: "Reiniciar tabla"}
-  //     ],
-  //     DELETE: [
-  //       {url: "/users/:id", hace: "Eliminar usuarios por id"}
-  //     ]
-  //   }
-  // });
-
-  res.json({
-    metodos: {
-      GET: {
-        "/db/health": "Health DB*",
-        "/users": "Listar (SELECT real)",
-        "/users/:id": "Obtener usuarios por id",
-        "/tables": "Listar tablas de base de datos",
-        "/health": "Mantén /health si ya lo tenías"
-      },
-      POST: {
-        "/users": "Crear usuario (name & email son obligatorios)"
-      },
-      PUT: {
-        "/users/:id": "Actualizar usuario (name & email son obligatorios)",
-        "/tables": "Reiniciar tabla"
-      },
-      DELETE: {
-        "/users/:id": "Eliminar usuarios por id"
-      }
-    }
-  });
-
-});
-
-
-// Health DB
+/* ================= ENDPOINTS ====================== */
+// Salud
+app.get("/health", (_req, res) => res.json({ status: "ok", service: SERVICE }));
 app.get("/db/health", async (_req, res) => {
   try {
     const r = await pool.query("SELECT 1 AS ok");
-    res.json({ ok: r.rows[0].ok === 1 });
+    res.json({ ok: r.rows[0]?.ok === 1 });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Listar (SELECT real)
-app.get("/users", async (_req, res) => {
+// Doc rápida
+app.get("/api", (_req, res) => {
+  res.json({
+    GET: {
+      "/appointments": "Listar (filtros: ?paciente_id=&medico_id=&estado=&from=&to=)",
+      "/appointments/:id": "Obtener cita por id",
+      "/db/health": "Salud de la BD",
+      "/health": "Salud del servicio"
+    },
+    POST: { "/appointments": "Crear cita" },
+    PUT:  { "/appointments/:id": "Actualizar cita" },
+    DELETE: { "/appointments/:id": "Eliminar cita" }
+  });
+});
+
+// Listar con filtros opcionales
+app.get("/appointments", async (req, res) => {
   try {
-    const r = await pool.query("SELECT id, name, email FROM users_schema.users ORDER BY id ASC");
-    res.status(200).json(r.rows);
+    const { paciente_id, medico_id, estado, from, to } = req.query;
+    const where = [];
+    const params = [];
+    let i = 1;
+
+    if (paciente_id) { where.push(`paciente_id = $${i++}`); params.push(Number(paciente_id)); }
+    if (medico_id)   { where.push(`medico_id  = $${i++}`); params.push(Number(medico_id)); }
+    if (estado)      { where.push(`estado ILIKE $${i++}`); params.push(estado); }
+    if (from)        { where.push(`inicio >= $${i++}`);    params.push(toIsoOrNull(from)); }
+    if (to)          { where.push(`inicio <  $${i++}`);    params.push(toIsoOrNull(to)); }
+
+    const sql = `
+      SELECT id, paciente_id, medico_id, inicio, fin, motivo, estado
+      FROM appointments_schema.citas
+      ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY inicio ASC
+    `;
+    const r = await pool.query(sql, params);
+    res.json(r.rows);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error listando citas", detail: String(e) });
   }
 });
 
-// Obtener usuarios por id
-app.get("/users/:id", async (req, res) => {
+// Obtener 1
+app.get("/appointments/:id", async (req, res) => {
   try {
     const r = await pool.query(
-      "SELECT id, name, email FROM users_schema.users WHERE id=$1",
-      [req.params.id]
+      `SELECT id, paciente_id, medico_id, inicio, fin, motivo, estado
+       FROM appointments_schema.citas WHERE id=$1`,
+      [Number(req.params.id)]
     );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
-    }
+    if (r.rowCount === 0) return res.status(404).json({ error: "Cita no encontrada" });
+    res.json(r.rows[0]);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error consultando cita", detail: String(e) });
   }
 });
 
-
-// Listar tablas de base de datos
-app.get("/tables", async (_req, res) => {
-  try {
-    const r = await pool.query("SELECT * FROM multiapisdb.information_schema.tables");
-    res.status(200).json(r.rows);
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+// Crear
+app.post("/appointments", async (req, res) => {
+  const { paciente_id, medico_id, inicio, fin, motivo = null, estado = "programada" } = req.body ?? {};
+  if (!paciente_id || !medico_id || !inicio || !fin) {
+    return res.status(400).json({ error: "paciente_id, medico_id, inicio y fin son obligatorios" });
   }
-});
-
-// Mantén /health si ya lo tenías
-app.get("/health", (_req, res) => res.json({ status: "ok", service: "users-api" }));
-
-
-// Crear usuario 
-app.post("/users", async (req, res) => {
-
-  let errores = [];
-  if (req.body.length != undefined) {
-    for (let x = 0; x < req.body.length; x++) {
-      const { name, email } = req.body[x] ?? {};
-      if (!name || !email) errores.push({ error: "name & email son obligatorios para " + (x + 1) });
-      // if (!name || !email) return res.status(400).json({ error: "name & email required" });
-    }
-
-    if (errores.length > 0) return res.status(400).json(errores);
-    // let resultado = { "201": [] };
-    let resultado = {};
-    resultado["201"] = [];
-    try {
-      for (let x = 0; x < req.body.length; x++) {
-        console.log(req.body[x]);
-        const { name, email } = req.body[x] ?? {};
-
-        const r = await pool.query(
-          "INSERT INTO users_schema.users(name, email) VALUES($1, $2) RETURNING id, name, email",
-          [name, email]
-        );
-        resultado['201'].push(r.rows);
-        // res.status(201).json(r.rows);
-        // res.json(r);
-      }
-      res.status(201).json(resultado);
-    } catch (e) {
-      return res.status(500).json({ error: "error creando usuario", detail: String(e) });
-    }
-  } else {
-    const { name, email } = req.body ?? {};
-    if (!name || !email) return res.status(400).json({ error: "name & email required" });
-
-    try {
-      const r = await pool.query(
-        "INSERT INTO users_schema.users(name, email) VALUES($1, $2) RETURNING id, name, email",
-        [name, email]
-      );
-      res.status(201).json(r.rows);
-      // res.json(r);
-    } catch (e) {
-      res.status(500).json({ error: "error creando usuario", detail: String(e) });
-    }
-  }
-
-});
-
-
-// Actualizar usuario 
-app.put("/users/:id", async (req, res) => {
-  const { name, email } = req.body ?? {};
-  if (!name || !email) return res.status(400).json({ error: "name & email required" });
+  const iISO = toIsoOrNull(inicio), fISO = toIsoOrNull(fin);
+  if (!iISO || !fISO) return res.status(400).json({ error: "Fechas inválidas" });
+  if (new Date(fISO) <= new Date(iISO)) return res.status(400).json({ error: "fin debe ser mayor a inicio" });
 
   try {
     const r = await pool.query(
-      "UPDATE users_schema.users SET name=$1, email=$2 WHERE id=$3 RETURNING id, name, email",
-      [name, email, req.params.id]
+      `INSERT INTO appointments_schema.citas
+       (paciente_id, medico_id, inicio, fin, motivo, estado)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, paciente_id, medico_id, inicio, fin, motivo, estado`,
+      [Number(paciente_id), Number(medico_id), iISO, fISO, motivo, estado]
     );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    if (e.code === "23503") {
+      // FK violation
+      return res.status(409).json({ error: "Paciente o médico no existe (FK)", detail: e.detail || String(e) });
     }
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    res.status(500).json({ error: "Error creando cita", detail: String(e) });
   }
 });
 
-// Reiniciar tabla
-app.put("/tables", async (req, res) => {
-  try {
-    const r = await pool.query("TRUNCATE TABLE users_schema.users RESTART IDENTITY");
-    res.status(200).json({ mensaje: "Tabla reiniciada" });
-  } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+// Actualizar (parcial)
+app.put("/appointments/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  // Normalizamos a null (para COALESCE)
+  const payload = {
+    paciente_id: req.body?.paciente_id ?? null,
+    medico_id:   req.body?.medico_id ?? null,
+    inicio:      toIsoOrNull(req.body?.inicio) ?? null,
+    fin:         toIsoOrNull(req.body?.fin) ?? null,
+    motivo:      req.body?.motivo ?? null,
+    estado:      req.body?.estado ?? null,
+  };
+
+  if (payload.inicio && payload.fin && new Date(payload.fin) <= new Date(payload.inicio)) {
+    return res.status(400).json({ error: "fin debe ser mayor a inicio" });
   }
-});
 
-
-// Eliminar usuarios por id
-app.delete("/users/:id", async (req, res) => {
   try {
     const r = await pool.query(
-      "DELETE FROM users_schema.users WHERE id=$1 RETURNING id, name, email",
-      [req.params.id]
+      `UPDATE appointments_schema.citas SET
+         paciente_id = COALESCE($2, paciente_id),
+         medico_id   = COALESCE($3, medico_id),
+         inicio      = COALESCE($4, inicio),
+         fin         = COALESCE($5, fin),
+         motivo      = COALESCE($6, motivo),
+         estado      = COALESCE($7, estado)
+       WHERE id = $1
+       RETURNING id, paciente_id, medico_id, inicio, fin, motivo, estado`,
+      [id, payload.paciente_id, payload.medico_id, payload.inicio, payload.fin, payload.motivo, payload.estado]
     );
-    // res.json(r);
-    if (r.rowCount > 0) {
-      res.status(200).json(r.rows);
-    } else {
-      res.status(404).json({ error: "USUARIO NO ENCONTRADO" });
-    }
+    if (r.rowCount === 0) return res.status(404).json({ error: "Cita no encontrada" });
+    res.json(r.rows[0]);
   } catch (e) {
-    res.status(500).json({ error: "query failed", detail: String(e) });
+    if (e.code === "23503") {
+      return res.status(409).json({ error: "Paciente o médico no existe (FK)", detail: e.detail || String(e) });
+    }
+    res.status(500).json({ error: "Error actualizando cita", detail: String(e) });
   }
 });
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(publicDir, "index.html"));
+// Eliminar
+app.delete("/appointments/:id", async (req, res) => {
+  try {
+    const r = await pool.query(
+      "DELETE FROM appointments_schema.citas WHERE id=$1 RETURNING id",
+      [Number(req.params.id)]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Cita no encontrada" });
+    res.json({ message: "Cita eliminada", id: r.rows[0].id });
+  } catch (e) {
+    res.status(500).json({ error: "Error eliminando cita", detail: String(e) });
+  }
 });
 
-app.listen(PORT, () => console.log(`✅ users-api on http://localhost:${PORT}`));
+// Reset (opcional para pruebas)
+app.put("/tables", async (_req, res) => {
+  try {
+    await pool.query("TRUNCATE TABLE appointments_schema.citas RESTART IDENTITY CASCADE");
+    res.json({ message: "Tabla citas reiniciada" });
+  } catch (e) {
+    res.status(500).json({ error: "Error reseteando tabla", detail: String(e) });
+  }
+});
+
+/* ===== STATIC + SPA FALLBACK ===== */
+const publicDir = path.join(__dirname, "../public");
+app.use(express.static(publicDir));
+app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+
+app.listen(PORT, () => console.log(`✅ ${SERVICE} en http://localhost:${PORT}`));
