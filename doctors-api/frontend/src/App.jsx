@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, getApiBase, setApiBase } from "./api";
 
+/* ======= catálogo de especialidades (ajústalo a tu gusto) ======= */
+const ESPECIALIDADES = [
+  "General",
+  "Pediatría",
+  "Cardiología",
+  "Dermatología",
+  "Ginecología",
+  "Odontología",
+  "Oftalmología",
+  "Ortopedia",
+  "Neurología",
+  "Psicología",
+];
+
 /* ========== Data hook ========== */
 function useDoctors() {
   const [items, setItems] = useState([]);
@@ -80,36 +94,55 @@ function Row({ item, all, onUpdate, onDelete }) {
 
   return (
     <tr>
-      <td>{item.id}</td>
+      <td className="mono w-min">{item.id}</td>
+
       <td>
         {editing ? (
-          <input className="row-edit-input" value={form.nombre_completo || ""} onChange={set("nombre_completo")} aria-invalid={!!errors.nombre_completo} />
+          <>
+            <input className="row-edit-input" value={form.nombre_completo || ""} onChange={set("nombre_completo")} aria-invalid={!!errors.nombre_completo} />
+            {errors.nombre_completo && <small className="field-error">{errors.nombre_completo}</small>}
+          </>
         ) : (
-          item.nombre_completo
+          <div className="cell-title">{item.nombre_completo}</div>
         )}
-        {editing && errors.nombre_completo && <small className="field-error">{errors.nombre_completo}</small>}
       </td>
+
       <td>
         {editing ? (
-          <input className="row-edit-input" value={form.especialidad || ""} onChange={set("especialidad")} aria-invalid={!!errors.especialidad} />
+          <>
+            <div className="pretty-select compact">
+              <select value={form.especialidad || ""} onChange={set("especialidad")} aria-invalid={!!errors.especialidad}>
+                <option value="">Seleccione especialidad</option>
+                {ESPECIALIDADES.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            </div>
+            {errors.especialidad && <small className="field-error">{errors.especialidad}</small>}
+          </>
         ) : (
           item.especialidad
         )}
-        {editing && errors.especialidad && <small className="field-error">{errors.especialidad}</small>}
       </td>
+
       <td>
         {editing ? (
-          <input className="row-edit-input" value={form.correo || ""} onChange={set("correo")} aria-invalid={!!errors.correo} />
+          <>
+            <input className="row-edit-input" value={form.correo || ""} onChange={set("correo")} aria-invalid={!!errors.correo} />
+            {errors.correo && <small className="field-error">{errors.correo}</small>}
+          </>
         ) : (
-          item.correo || ""
+          <div className="cell-sub">{item.correo || "—"}</div>
         )}
-        {editing && errors.correo && <small className="field-error">{errors.correo}</small>}
       </td>
-      <td>{editing ? <input className="row-edit-input" value={form.telefono || ""} onChange={set("telefono")} /> : item.telefono || ""}</td>
+
+      <td>{editing ? <input className="row-edit-input" value={form.telefono || ""} onChange={set("telefono")} /> : (item.telefono || "—")}</td>
+
       <td className="center">
-        {editing ? <input type="checkbox" checked={!!form.activo} onChange={set("activo")} /> : item.activo ? "Sí" : "No"}
+        {editing ? <input type="checkbox" checked={!!form.activo} onChange={set("activo")} /> : (item.activo ? "Sí" : "No")}
       </td>
-      <td className="row-actions">
+
+      <td className="row-actions w-min">
         {editing ? (
           <>
             <button onClick={onSave} disabled={saving}>Guardar</button>
@@ -215,24 +248,36 @@ export default function App() {
               <input value={form.nombre_completo} onChange={set("nombre_completo")} aria-invalid={!!errors.nombre_completo} />
               {errors.nombre_completo && <small className="field-error">{errors.nombre_completo}</small>}
             </div>
+
             <div className="form-row">
               <label>Especialidad</label>
-              <input value={form.especialidad} onChange={set("especialidad")} aria-invalid={!!errors.especialidad} />
+              <div className="pretty-select">
+                <select value={form.especialidad} onChange={set("especialidad")} aria-invalid={!!errors.especialidad}>
+                  <option value="">Seleccione una especialidad</option>
+                  {ESPECIALIDADES.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
               {errors.especialidad && <small className="field-error">{errors.especialidad}</small>}
             </div>
+
             <div className="form-row">
               <label>Correo</label>
               <input type="email" value={form.correo} onChange={set("correo")} aria-invalid={!!errors.correo} />
               {errors.correo && <small className="field-error">{errors.correo}</small>}
             </div>
+
             <div className="form-row">
               <label>Teléfono</label>
               <input value={form.telefono} onChange={set("telefono")} />
             </div>
+
             <div className="form-row">
               <label>Activo</label>
               <input type="checkbox" checked={!!form.activo} onChange={set("activo")} />
             </div>
+
             <button type="submit" disabled={creating}>{creating ? "Creando..." : "Crear"}</button>
           </form>
         </section>
@@ -245,20 +290,28 @@ export default function App() {
               <button onClick={load} disabled={loading}>{loading ? "Cargando..." : "Actualizar"}</button>
             </div>
           </div>
+
           <div className="list-tools">
-            <input className="search-input" placeholder="Buscar por nombre, especialidad, correo..." value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input
+              className="search-input"
+              placeholder="Buscar por nombre, especialidad, correo..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
           </div>
+
           {error && <div className="list-status error">Error: {error}</div>}
-          <table>
+
+          <table className="table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th className="w-min">ID</th>
                 <th>Nombre completo</th>
                 <th>Especialidad</th>
                 <th>Correo</th>
                 <th>Teléfono</th>
-                <th>Activo</th>
-                <th>Acciones</th>
+                <th className="w-min">Activo</th>
+                <th className="w-min">Acciones</th>
               </tr>
             </thead>
             <tbody>

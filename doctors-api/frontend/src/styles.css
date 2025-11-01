@@ -303,3 +303,41 @@ footer {
     padding: 16px;
     color: var(--muted);
 }
+/* === SELECTS bonitos y consistentes (tema oscuro) === */
+select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  background:#0f172a; color:#e5e7eb;
+  border:1px solid #263246; border-radius:.6rem;
+  padding:.6rem .9rem; width:100%; line-height:1.2;
+}
+select:focus{
+  outline:none; border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.25);
+}
+select:disabled{ opacity:.6; cursor:not-allowed; }
+select option{ background:#0f172a; color:#e5e7eb; }
+
+.pretty-select{ position:relative; width:100%; }
+.pretty-select select{ padding-right:2.2rem; }
+.pretty-select::after{
+  content:"▾"; position:absolute; right:.65rem; top:50%;
+  transform:translateY(-50%); pointer-events:none; opacity:.7; color:#9aa4b2;
+}
+.pretty-select.compact select{ padding-right:1.8rem; }
+
+/* === Tabla responsiva y que usa todo el ancho === */
+table.table{ width:100%; border-collapse:collapse; table-layout:auto; }
+.table th, .table td{ padding:.75rem .9rem; vertical-align:middle; text-align:left; }
+.table thead th{ font-weight:700; color:#cbd5e1; border-bottom:1px solid #1f2937; background:rgba(255,255,255,.03); }
+.table tbody tr + tr{ border-top:1px solid #121a2a; }
+.table .w-min{ white-space:nowrap; width:1%; }
+.mono{ font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace; }
+.center{ text-align:center; }
+
+.cell-title{ font-weight:600; line-height:1.2; }
+.cell-sub{ font-size:.9rem; opacity:.85; }
+
+.row-actions{ display:flex; gap:8px; }
+.row-edit-input{
+  width:100%; padding:10px 12px; border:1px solid var(--border);
+  border-radius:8px; background:var(--panel); color:var(--text);
+}
