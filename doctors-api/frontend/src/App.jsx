@@ -139,7 +139,17 @@ function Row({ item, all, onUpdate, onDelete }) {
       <td>{editing ? <input className="row-edit-input" value={form.telefono || ""} onChange={set("telefono")} /> : (item.telefono || "—")}</td>
 
       <td className="center">
-        {editing ? <input type="checkbox" checked={!!form.activo} onChange={set("activo")} /> : (item.activo ? "Sí" : "No")}
+        {editing ?
+          <label className="switch small" title={form.activo ? "Activo" : "Inactivo"}>
+            <input
+              type="checkbox"
+              checked={!!form.activo}
+              onChange={set("activo")}
+              aria-label="Activo"
+            />
+            <span className="slider" aria-hidden="true"></span>
+          </label>
+          : (item.activo ? "Sí" : "No")}
       </td>
 
       <td className="row-actions w-min">
@@ -275,7 +285,15 @@ export default function App() {
 
             <div className="form-row">
               <label>Activo</label>
-              <input type="checkbox" checked={!!form.activo} onChange={set("activo")} />
+              <label className="switch" title={form.activo ? "Activo" : "Inactivo"}>
+                <input
+                  type="checkbox"
+                  checked={!!form.activo}
+                  onChange={set("activo")}
+                  aria-label="Activo"
+                />
+                <span className="slider" aria-hidden="true"></span>
+              </label>
             </div>
 
             <button type="submit" disabled={creating}>{creating ? "Creando..." : "Crear"}</button>

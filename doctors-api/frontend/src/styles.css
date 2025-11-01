@@ -341,3 +341,73 @@ table.table{ width:100%; border-collapse:collapse; table-layout:auto; }
   width:100%; padding:10px 12px; border:1px solid var(--border);
   border-radius:8px; background:var(--panel); color:var(--text);
 }
+/* ===== Toggle switch bonito para checkboxes ===== */
+.switch{
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 28px;
+  vertical-align: middle;
+}
+.switch.small{ width: 40px; height: 24px; }
+
+.switch input{
+  /* Ocultamos el input pero sigue siendo accesible y focusable */
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.switch .slider{
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: #1f2a44;
+  border: 1px solid #263246;
+  border-radius: 999px;
+  transition: background .2s ease, border-color .2s ease;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.25);
+}
+.switch .slider::before{
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translate(0, -50%);
+  width: 22px; height: 22px;
+  background: #94a3b8;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,.35);
+  transition: transform .2s ease, background .2s ease;
+}
+.switch.small .slider::before{ width: 18px; height: 18px; }
+
+/* Estado activo */
+.switch input:checked + .slider{
+  background: linear-gradient(180deg, var(--primary), var(--primary-600));
+  border-color: var(--primary-600);
+}
+.switch input:checked + .slider::before{
+  transform: translate(20px, -50%);
+  background: #fff;
+}
+.switch.small input:checked + .slider::before{
+  transform: translate(16px, -50%);
+}
+
+/* Focus visible */
+.switch input:focus + .slider{
+  box-shadow: 0 0 0 3px rgba(59,130,246,.35);
+}
+
+/* Disabled */
+.switch input:disabled + .slider{
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+/* (Opcional) si en algún sitio sigues usando checkboxes “crudos” */
+input[type="checkbox"]{
+  accent-color: var(--primary);
+}
