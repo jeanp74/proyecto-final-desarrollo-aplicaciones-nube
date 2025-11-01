@@ -4,7 +4,7 @@ import { api, getApiBase, setApiBase } from "./api";
 /* ===== Utils ===== */
 const fmtMoney = (n) => {
   const v = Number(n ?? 0);
-  if (!Number.isFinite(v)) return "0";
+  if (!Number.isFinite(v)) return "0.00";
   return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
@@ -18,26 +18,19 @@ function useMedicines() {
     setLoading(true); setError("");
     try {
       const data = await api("/medicines");
-      // Orden por id asc y, de fallback, por nombre
       const sorted = [...data].sort((a, b) => {
         const ai = a.id ?? 0, bi = b.id ?? 0;
         if (ai && bi && ai !== bi) return ai - bi;
         return String(a.nombre || "").localeCompare(String(b.nombre || ""));
       });
       setItems(sorted);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   };
 
   const create = async (payload) => {
     const m = await api("/medicines", { method: "POST", body: JSON.stringify(payload) });
-    setItems((prev) => {
-      const next = [...prev, m];
-      return next.sort((a, b) => (a.id ?? 0) - (b.id ?? 0) || String(a.nombre||"").localeCompare(String(b.nombre||"")));
-    });
+    setItems((prev) => [...prev, m].sort((a, b) => (a.id ?? 0) - (b.id ?? 0) || String(a.nombre||"").localeCompare(String(b.nombre||""))));
   };
 
   const update = async (id, payload) => {
@@ -86,11 +79,9 @@ function MedRow({ item, onUpdate, onDelete, onAdjust }) {
 
     setSaving(true);
     try {
-      await onUpdate(item._id, f); // el backend acepta _id o id numérico
+      await onUpdate(item._id, f);
       setEditing(false);
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const onApplyDelta = async () => {
@@ -99,9 +90,7 @@ function MedRow({ item, onUpdate, onDelete, onAdjust }) {
     try {
       await onAdjust(item._id, { delta: d });
       setDelta("");
-    } catch (e) {
-      alert(e.message);
-    }
+    } catch (e) { alert(e.message); }
   };
 
   const idShown = item.id ?? (item._id ? String(item._id).slice(-6) : "—");
@@ -168,6 +157,7 @@ function MedRow({ item, onUpdate, onDelete, onAdjust }) {
               placeholder="+/-"
               value={delta}
               onChange={(e) => setDelta(e.target.value)}
+              title="Ajuste de stock (positivo o negativo)"
             />
             <button className="secondary" onClick={onApplyDelta}>Aplicar</button>
             <button className="secondary" onClick={() => setEditing(true)}>Editar</button>
@@ -179,7 +169,17 @@ function MedRow({ item, onUpdate, onDelete, onAdjust }) {
   );
 }
 
-/* ====== Recetas ====== */
+/* ====== Recetas (referencias a otros servicios) ====== */
+const LS_PAC = "pharmacy_patients_api_base";
+const LS_DOC = "pharmacy_doctors_api_base";
+const DEFAULT_PAC = import.meta.env.VITE_PATIENTS_API || "https://patients-proyecto-final-desarrollo-dvdpe0eegng6atfy.brazilsouth-01.azurewebsites.net/";
+const DEFAULT_DOC = import.meta.env.VITE_DOCTORS_API  || "https://doctors-proyecto-final-desarrollo-b7aqbdbpcgd0d7bq.brazilsouth-01.azurewebsites.net/";
+
+const getPatientsApiBase = () => localStorage.getItem(LS_PAC) || DEFAULT_PAC;
+const setPatientsApiBase = (v) => localStorage.setItem(LS_PAC, v);
+const getDoctorsApiBase  = () => localStorage.getItem(LS_DOC) || DEFAULT_DOC;
+const setDoctorsApiBase  = (v) => localStorage.setItem(LS_DOC, v);
+
 function usePrescriptions() {
   const [items, setItems] = useState([]);
   const load = async (filters = {}) => {
@@ -195,21 +195,40 @@ function usePrescriptions() {
 }
 
 export default function App() {
-  const { items: meds, loading, error, load, create, update, remove, adjustStock } = useMedicines();
+  const inv = useMedicines();
   const presc = usePrescriptions();
 
-  const [apiBase, setApiBaseState] = useState(getApiBase());
-  useEffect(() => { load(); presc.load(); }, []);
+  /* bases externas (pacientes / doctores) */
+  const [pacApiBase, setPacApiBase] = useState(getPatientsApiBase());
+  const [docApiBase, setDocApiBase] = useState(getDoctorsApiBase());
+  const [pacientes, setPacientes] = useState([]);
+  const [doctores, setDoctores] = useState([]);
 
+  const loadRefs = async () => {
+    try {
+      const [p, d] = await Promise.all([
+        fetch(`${pacApiBase}patients`).then(r => r.json()),
+        fetch(`${docApiBase}doctors`).then(r => r.json()),
+      ]);
+      setPacientes(p); setDoctores(d);
+    } catch (e) { alert("Error cargando pacientes/doctores: " + e.message); }
+  };
+
+  /* init */
+  const [apiBase, setApiBaseState] = useState(getApiBase());
+  useEffect(() => { inv.load(); presc.load(); loadRefs(); }, []);
+
+  /* filtro inventario */
   const [query, setQuery] = useState("");
   const [qDeb, setQDeb] = useState("");
   useEffect(() => { const t = setTimeout(() => setQDeb(query.trim().toLowerCase()), 250); return () => clearTimeout(t); }, [query]);
 
   const filtered = useMemo(() => {
-    if (!qDeb) return meds;
-    return meds.filter((m) => [m.nombre, m.sku].some((v) => String(v || "").toLowerCase().includes(qDeb)));
-  }, [meds, qDeb]);
+    if (!qDeb) return inv.items;
+    return inv.items.filter((m) => [m.nombre, m.sku].some((v) => String(v || "").toLowerCase().includes(qDeb)));
+  }, [inv.items, qDeb]);
 
+  /* crear medicamento */
   const [form, setForm] = useState({ nombre: "", sku: "", precio: "0", unidad: "und", stock: "0" });
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
@@ -230,7 +249,7 @@ export default function App() {
     if (!payload.nombre) return alert("Nombre requerido");
     if (!Number.isFinite(payload.stock) || payload.stock < 0) return alert("Stock inválido");
     try {
-      await create(payload);
+      await inv.create(payload);
       setForm({ nombre: "", sku: "", precio: "0", unidad: "und", stock: "0" });
     } catch (e) { alert(e.message); }
   };
@@ -246,7 +265,7 @@ export default function App() {
     const id = rx.item_medicina_id;
     const cantidad = Number(rx.item_cantidad);
     if (!id || !Number.isFinite(cantidad) || cantidad <= 0) return alert("Selecciona medicina y cantidad > 0");
-    const med = meds.find((m) => m._id === id);
+    const med = inv.items.find((m) => m._id === id);
     if (!med) return alert("Medicina inválida");
     setRx((s) => ({
       ...s,
@@ -270,11 +289,11 @@ export default function App() {
       await presc.create(payload);
       alert("Receta creada y stock descontado");
       setRx({ paciente_id: "", medico_id: "", item_medicina_id: "", item_cantidad: "", items: [], notas: "" });
-      load(); // recargar inventario por si cambió stock
-    } catch (e) {
-      alert("Error creando receta: " + e.message);
-    }
+      inv.load();
+    } catch (e) { alert("Error creando receta: " + e.message); }
   };
+
+  const idShownRx = (x) => x.id ?? (x._id ? String(x._id).slice(-6) : "—");
 
   return (
     <div className="container">
@@ -307,13 +326,13 @@ export default function App() {
             <h2>Inventario</h2>
             <div className="right">
               <small>Registros: {filtered.length}</small>
-              <button onClick={load} disabled={loading}>{loading ? "Cargando..." : "Actualizar"}</button>
+              <button onClick={inv.load} disabled={inv.loading}>{inv.loading ? "Cargando..." : "Actualizar"}</button>
             </div>
           </div>
           <div className="list-tools">
             <input className="search-input" placeholder="Buscar por nombre o SKU..." value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          {error && <div className="list-status error">Error: {error}</div>}
+          {inv.error && <div className="list-status error">Error: {inv.error}</div>}
 
           <table className="table">
             <thead>
@@ -330,7 +349,7 @@ export default function App() {
               {filtered.length === 0 ? (
                 <tr><td colSpan={6}><div className="empty-state">Sin medicamentos.</div></td></tr>
               ) : filtered.map((m) => (
-                <MedRow key={m._id} item={m} onUpdate={update} onDelete={remove} onAdjust={adjustStock} />
+                <MedRow key={m._id} item={m} onUpdate={inv.update} onDelete={inv.remove} onAdjust={inv.adjustStock} />
               ))}
             </tbody>
           </table>
@@ -339,24 +358,63 @@ export default function App() {
         {/* Recetas */}
         <section className="card">
           <h2>Crear receta</h2>
+
+          {/* Configuración de APIs externas + botón Cargar */}
+          <div className="list-tools" style={{ marginTop: 0 }}>
+            <input className="search-input" value={pacApiBase} onChange={(e)=>setPacApiBase(e.target.value)} />
+            <button className="secondary" onClick={()=>{ setPatientsApiBase(pacApiBase); }}>Guardar Pacientes API</button>
+            <input className="search-input" value={docApiBase} onChange={(e)=>setDocApiBase(e.target.value)} />
+            <button className="secondary" onClick={()=>{ setDoctorsApiBase(docApiBase); }}>Guardar Doctores API</button>
+            <button onClick={loadRefs}>Cargar</button>
+          </div>
+
           <form onSubmit={submitRx} className="grid-form">
-            <div className="form-row"><label>Paciente ID</label><input value={rx.paciente_id} onChange={(e) => setRx((s) => ({ ...s, paciente_id: e.target.value }))} /></div>
-            <div className="form-row"><label>Médico ID</label><input value={rx.medico_id} onChange={(e) => setRx((s) => ({ ...s, medico_id: e.target.value }))} /></div>
+            <div className="form-row">
+              <label>Paciente</label>
+              <div className="pretty-select">
+                <select
+                  value={rx.paciente_id}
+                  onChange={(e) => setRx((s) => ({ ...s, paciente_id: e.target.value }))}
+                >
+                  <option value="">Seleccione paciente</option>
+                  {pacientes.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.id} — {p.nombres} {p.apellidos} ({p.correo})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <label>Médico</label>
+              <div className="pretty-select">
+                <select
+                  value={rx.medico_id}
+                  onChange={(e) => setRx((s) => ({ ...s, medico_id: e.target.value }))}
+                >
+                  <option value="">Seleccione médico</option>
+                  {doctores.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.id} — {d.nombre_completo} ({d.especialidad || "—"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
             <div className="form-row">
               <label>Medicamento</label>
               <div className="pretty-select">
                 <select value={rx.item_medicina_id} onChange={(e) => setRx((s) => ({ ...s, item_medicina_id: e.target.value }))}>
                   <option value="">(seleccione)</option>
-                  {meds.map((m) => <option key={m._id} value={m._id}>{m.nombre} — stock {m.stock}</option>)}
+                  {inv.items.map((m) => <option key={m._id} value={m._id}>{m.nombre} — stock {m.stock}</option>)}
                 </select>
               </div>
             </div>
 
             <div className="form-row"><label>Cantidad</label><input value={rx.item_cantidad} onChange={(e) => setRx((s) => ({ ...s, item_cantidad: e.target.value }))} /></div>
-            <div className="form-row">
-              <button type="button" onClick={addRxItem}>Agregar ítem</button>
-            </div>
+            <div className="form-row"><button type="button" onClick={addRxItem}>Agregar ítem</button></div>
             <div className="form-row"><label>Notas</label><input value={rx.notas} onChange={(e) => setRx((s) => ({ ...s, notas: e.target.value }))} /></div>
             <button type="submit">Crear receta</button>
           </form>
@@ -378,7 +436,7 @@ export default function App() {
             <h3>Recientes</h3>
             <ul>
               {presc.items.map((p) => (
-                <li key={p._id}>#{(p.id ?? String(p._id).slice(-6))} · paciente {p.paciente_id} · médico {p.medico_id} · {new Date(p.fecha).toLocaleString()}</li>
+                <li key={p._id}>#{idShownRx(p)} · paciente {p.paciente_id} · médico {p.medico_id} · {new Date(p.fecha).toLocaleString()}</li>
               ))}
             </ul>
           </div>
