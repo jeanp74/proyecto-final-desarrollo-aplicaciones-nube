@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, getApiBase, setApiBase } from "./api";
 
-/* ======= catálogo de especialidades (ajústalo a tu gusto) ======= */
+/* ===== Catálogo de especialidades ===== */
 const ESPECIALIDADES = [
   "General",
   "Pediatría",
@@ -15,7 +15,7 @@ const ESPECIALIDADES = [
   "Psicología",
 ];
 
-/* ========== Data hook ========== */
+/* ===== Hook de datos ===== */
 function useDoctors() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +51,7 @@ function useDoctors() {
   return { items, loading, error, load, create, update, remove };
 }
 
-/* ========== Row editable ========== */
+/* ===== Fila editable ===== */
 function Row({ item, all, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(item);
@@ -139,17 +139,17 @@ function Row({ item, all, onUpdate, onDelete }) {
       <td>{editing ? <input className="row-edit-input" value={form.telefono || ""} onChange={set("telefono")} /> : (item.telefono || "—")}</td>
 
       <td className="center">
-        {editing ?
-          <label className="switch small" title={form.activo ? "Activo" : "Inactivo"}>
-            <input
-              type="checkbox"
-              checked={!!form.activo}
-              onChange={set("activo")}
-              aria-label="Activo"
-            />
-            <span className="slider" aria-hidden="true"></span>
-          </label>
-          : (item.activo ? "Sí" : "No")}
+        {editing ? (
+          <input
+            type="checkbox"
+            className="toggle small"
+            checked={!!form.activo}
+            onChange={set("activo")}
+            aria-label="Activo"
+          />
+        ) : (
+          (item.activo ? "Sí" : "No")
+        )}
       </td>
 
       <td className="row-actions w-min">
@@ -169,12 +169,13 @@ function Row({ item, all, onUpdate, onDelete }) {
   );
 }
 
-/* ========== App ========== */
+/* ===== App ===== */
 export default function App() {
   const { items, loading, error, load, create, update, remove } = useDoctors();
   const [apiBase, setApiBaseState] = useState(getApiBase());
   const [query, setQuery] = useState("");
   const [qDeb, setQDeb] = useState("");
+
   useEffect(() => { const t = setTimeout(() => setQDeb(query.trim().toLowerCase()), 250); return () => clearTimeout(t); }, [query]);
   useEffect(() => { load(); }, []);
 
@@ -186,7 +187,13 @@ export default function App() {
     );
   }, [items, qDeb]);
 
-  const [form, setForm] = useState({ nombre_completo: "", especialidad: "", correo: "", telefono: "", activo: true });
+  const [form, setForm] = useState({
+    nombre_completo: "",
+    especialidad: "",
+    correo: "",
+    telefono: "",
+    activo: true,
+  });
   const [creating, setCreating] = useState(false);
   const [errors, setErrors] = useState({});
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: k === "activo" ? e.target.checked : e.target.value }));
@@ -285,15 +292,13 @@ export default function App() {
 
             <div className="form-row">
               <label>Activo</label>
-              <label className="switch" title={form.activo ? "Activo" : "Inactivo"}>
-                <input
-                  type="checkbox"
-                  checked={!!form.activo}
-                  onChange={set("activo")}
-                  aria-label="Activo"
-                />
-                <span className="slider" aria-hidden="true"></span>
-              </label>
+              <input
+                type="checkbox"
+                className="toggle"
+                checked={!!form.activo}
+                onChange={set("activo")}
+                aria-label="Activo"
+              />
             </div>
 
             <button type="submit" disabled={creating}>{creating ? "Creando..." : "Crear"}</button>
