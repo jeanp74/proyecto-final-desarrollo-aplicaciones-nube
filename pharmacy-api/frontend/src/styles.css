@@ -161,3 +161,21 @@ table.table{ width:100%; border-collapse:collapse; table-layout:auto; }
 .toast.error{ border-color: rgba(239,68,68,.5); }
 
 footer{ text-align:center; padding:16px; color:var(--muted); }
+.pretty-select{ position: relative; width: 100%; }
+.pretty-select select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  width:100%; padding:.6rem .9rem; padding-right:2.2rem;
+  background:#0f172a; color:#e5e7eb; border:1px solid #263246; border-radius:.6rem;
+}
+.pretty-select::after{
+  content:"▾"; position:absolute; right:.65rem; top:50%;
+  transform:translateY(-50%); pointer-events:none; opacity:.7; color:#9aa4b2;
+}
+.pretty-select select:focus{
+  outline:none; border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.25);
+}
+.badge{ padding:.2rem .55rem; border-radius:.5rem; font-size:.85rem; display:inline-block; }
+.badge.programada{   background:rgba(59,130,246,.18);  color:#cfe0ff; }
+.badge.reprogramada{ background:rgba(234,179,8,.2);   color:#ffe2a3; }
+.badge.cancelada{    background:rgba(239,68,68,.18);  color:#ffc8c8; }
+.badge.hecha{        background:rgba(34,197,94,.18);  color:#c9ffd6; }
