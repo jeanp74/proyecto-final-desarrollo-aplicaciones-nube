@@ -1,4 +1,3 @@
-// pharmacy-frontend/src/App.jsx
 import { useEffect, useMemo, useState } from "react";
 import {
   api,
@@ -8,38 +7,42 @@ import {
   extGet
 } from "./api";
 
-/* ========== Helpers UI ========== */
-const money = (n) => Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(Number(n || 0));
-const fmtId = (row) => (row?.id ?? (row?._id ? String(row._id).slice(0, 6) : "—"));
+/* ===== Helpers UI ===== */
+const money = (n) =>
+  Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(Number(n || 0));
+const fmtId = (row) => row?.id ?? (row?._id ? String(row._id).slice(-6) : "—");
 const asInt = (v) => (isNaN(parseInt(v, 10)) ? 0 : parseInt(v, 10));
 
-/* ========== Hooks de datos (Pharmacy) ========== */
+/* ===== Hooks pharmacy ===== */
 function useMedicines() {
-  const [items, setItems]   = useState([]);
-  const [loading, setLoad]  = useState(false);
-  const [error, setError]   = useState("");
+  const [items, setItems] = useState([]);
+  const [loading, setLoad] = useState(false);
+  const [error, setError] = useState("");
 
   const load = async () => {
-    setLoad(true); setError("");
+    setLoad(true);
+    setError("");
     try {
       const data = await api("/medicines");
-      // ordena por id asc y nombre
-      data.sort((a, b) => (a.id ?? 1e12) - (b.id ?? 1e12) || String(a.nombre).localeCompare(String(b.nombre)));
+      data.sort(
+        (a, b) => (a.id ?? 1e12) - (b.id ?? 1e12) || String(a.nombre).localeCompare(String(b.nombre))
+      );
       setItems(data);
-    } catch (e) { setError(e.message); }
-    finally { setLoad(false); }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoad(false);
+    }
   };
 
   const create = async (payload) => {
     const r = await api("/medicines", { method: "POST", body: JSON.stringify(payload) });
     setItems((prev) => [...prev, r]);
   };
-
   const update = async (id, payload) => {
     const r = await api(`/medicines/${id}`, { method: "PUT", body: JSON.stringify(payload) });
     setItems((prev) => prev.map((x) => (x.id === id ? r : x)));
   };
-
   const remove = async (id) => {
     await api(`/medicines/${id}`, { method: "DELETE" });
     setItems((prev) => prev.filter((x) => x.id !== id));
@@ -48,41 +51,54 @@ function useMedicines() {
   return { items, loading, error, load, create, update, remove, setItems };
 }
 
-function useRecipes() {
-  const create = async (payload) => {
-    return api("/recipes", { method: "POST", body: JSON.stringify(payload) });
-  };
+function usePrescriptions() {
+  const create = async (payload) =>
+    api("/prescriptions", { method: "POST", body: JSON.stringify(payload) });
   return { create };
 }
 
-/* ========== Hooks catálogos externos (Pacientes / Doctores) ========== */
-function useRoster(getBase, setBase) {
-  const [base, setBaseState] = useState(getBase());
+/* ===== Catálogos externos (Pacientes / Doctores) ===== */
+function useRoster(kind /* "patients" | "doctors" */) {
+  const isPatients = kind === "patients";
+  const getBase = isPatients ? getPatientsBase : getDoctorsBase;
+  const setBaseLS = isPatients ? setPatientsBase : setDoctorsBase;
+
+  const [base, setBase] = useState(getBase());
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   const load = async () => {
     if (!base) return;
-    setBusy(true); setErr("");
+    setBusy(true);
+    setErr("");
     try {
-      const path = base.includes("patients") ? "/patients" : "/doctors";
-      const data = await extGet(base, path);
+      const data = await extGet(base, `/${kind}`);
+      // normalizo para mostrar en selects
       const mapped = (data || []).map((x) => ({
         id: x.id,
-        nombre: x.nombre_completo || x.nombres || x.name || "",
+        nombre:
+          x.nombre_completo || [x.nombres, x.apellidos].filter(Boolean).join(" ") || x.name || "",
         correo: x.correo || x.email || "",
         especialidad: x.especialidad || "",
       }));
       setItems(mapped);
-      setBase(base); // persistir en LS
+      setBaseLS(base); // persiste
     } catch (e) {
       setErr(e.message || "Error cargando");
       setItems([]);
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
-  return { base, setBase: setBaseState, items, busy, err, load };
+  // === Auto-carga inicial y cuando cambia la base ===
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base]);
+
+  return { base, setBase, items, busy, err, load };
 }
 
 const labelPaciente = (p) =>
@@ -92,24 +108,25 @@ const labelMedico = (d) =>
 
 /* ============================ App ============================ */
 export default function App() {
-  // Bases de APIs
+  // Bases de APIs (header)
   const [apiBase, setApiBaseState] = useState(getApiBase());
-  const patients = useRoster(getPatientsBase, setPatientsBase);
-  const doctors  = useRoster(getDoctorsBase,  setDoctorsBase);
+  const patients = useRoster("patients");
+  const doctors = useRoster("doctors");
 
   // Pharmacy data
   const meds = useMedicines();
-  const recipes = useRecipes();
+  const rx = usePrescriptions();
 
-  // Cargar datos
-  useEffect(() => { meds.load(); }, []);
-  useEffect(() => { patients.load(); }, [patients.base]);
-  useEffect(() => { doctors.load();  }, [doctors.base]);
+  // === Carga automática al abrir (igual que Citas) ===
+  useEffect(() => {
+    meds.load();
+    // patients.load() y doctors.load() ya se disparan en sus propios hooks
+    // gracias al useEffect([base]) dentro de useRoster.
+  }, []);
 
-  // =================== Registrar medicamento ===================
+  /* ----- Registrar medicamento ----- */
   const [mForm, setMForm] = useState({ nombre: "", sku: "", precio: 0, unidad: "und", stock: 0 });
   const setM = (k) => (e) => setMForm((s) => ({ ...s, [k]: e.target.value }));
-
   const createMedicine = async (e) => {
     e.preventDefault();
     if (!mForm.nombre || !mForm.sku) return alert("Nombre y SKU son obligatorios");
@@ -129,7 +146,6 @@ export default function App() {
     }
   };
 
-  // Ajuste simple de stock por fila
   const quickAdjust = async (row, delta) => {
     const nuevo = Math.max(0, asInt(row.stock) + delta);
     try {
@@ -140,67 +156,72 @@ export default function App() {
     }
   };
 
-  // =================== Crear receta ===================
+  /* ----- Crear receta ----- */
   const [rForm, setRForm] = useState({
     paciente_id: "",
     medico_id: "",
-    item_medicamento_id: "",
+    item_medicina_id: "",
     item_cantidad: 1,
     notas: "",
   });
-  const [itemsReceta, setItemsReceta] = useState([]); // {medicamento_id, cantidad}
+  const [itemsReceta, setItemsReceta] = useState([]); // {medicina_id, cantidad}
   const setR = (k) => (e) => setRForm((s) => ({ ...s, [k]: e.target.value }));
 
   const addItem = () => {
-    const mid = Number(rForm.item_medicamento_id);
+    const oid = rForm.item_medicina_id; // usamos _id de la medicina para máxima compatibilidad
     const qty = Math.max(1, Number(rForm.item_cantidad || 1));
-    if (!mid) return;
-    const m = meds.items.find((x) => x.id === mid);
+    if (!oid) return;
+    const m = meds.items.find((x) => String(x._id) === String(oid));
     if (!m) return;
     setItemsReceta((prev) => {
-      const idx = prev.findIndex((p) => p.medicamento_id === mid);
+      const idx = prev.findIndex((p) => String(p.medicina_id) === String(oid));
       if (idx >= 0) {
         const copy = [...prev];
         copy[idx] = { ...copy[idx], cantidad: copy[idx].cantidad + qty };
         return copy;
       }
-      return [...prev, { medicamento_id: mid, cantidad: qty }];
+      return [...prev, { medicina_id: oid, cantidad: qty }];
     });
-    setRForm((s) => ({ ...s, item_cantidad: 1, item_medicamento_id: "" }));
+    setRForm((s) => ({ ...s, item_cantidad: 1, item_medicina_id: "" }));
   };
 
-  const removeItem = (mid) => setItemsReceta((prev) => prev.filter((p) => p.medicamento_id !== mid));
+  const removeItem = (oid) =>
+    setItemsReceta((prev) => prev.filter((p) => String(p.medicina_id) !== String(oid)));
 
-  const createRecipe = async (e) => {
+  const createPrescription = async (e) => {
     e.preventDefault();
     if (!rForm.paciente_id || !rForm.medico_id) return alert("Paciente y Médico son obligatorios");
     if (itemsReceta.length === 0) return alert("Agrega al menos un medicamento");
+
     const payload = {
       paciente_id: Number(rForm.paciente_id),
       medico_id: Number(rForm.medico_id),
-      items: itemsReceta.map((it) => ({ medicamento_id: it.medicamento_id, cantidad: Number(it.cantidad) })),
+      items: itemsReceta.map((it) => ({
+        medicina_id: it.medicina_id, // enviamos _id (string)
+        cantidad: Number(it.cantidad),
+      })),
       notas: rForm.notas?.trim() || null,
     };
+
     try {
-      await recipes.create(payload);
-      // limpiar
-      setRForm({ paciente_id: "", medico_id: "", item_medicamento_id: "", item_cantidad: 1, notas: "" });
+      await rx.create(payload);
+      setRForm({ paciente_id: "", medico_id: "", item_medicina_id: "", item_cantidad: 1, notas: "" });
       setItemsReceta([]);
       alert("Receta creada");
+      // Si tu backend descuenta stock al crear receta, puedes recargar inventario:
+      meds.load();
     } catch (e) {
       alert("Error creando receta: " + e.message);
     }
   };
 
-  // Filtros inventario
+  // Filtro inventario
   const [q, setQ] = useState("");
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return meds.items;
     return meds.items.filter(
-      (m) =>
-        String(m.nombre).toLowerCase().includes(s) ||
-        String(m.sku).toLowerCase().includes(s)
+      (m) => String(m.nombre).toLowerCase().includes(s) || String(m.sku).toLowerCase().includes(s)
     );
   }, [q, meds.items]);
 
@@ -208,28 +229,47 @@ export default function App() {
     <div className="container">
       <header>
         <h1>Farmacia</h1>
-        <div className="api-config stack">
-          <div className="row">
-            <label htmlFor="apiBase">API Base</label>
-            <input id="apiBase" value={apiBase} onChange={(e) => setApiBaseState(e.target.value)} placeholder="/" />
-          </div>
-          <div className="row">
-            <label htmlFor="patientsBase">Pacientes API</label>
-            <input id="patientsBase" value={patients.base} onChange={(e) => patients.setBase(e.target.value)} placeholder="https://patients-..." />
-            <button className="secondary" onClick={patients.load} disabled={patients.busy}>Cargar</button>
-          </div>
-          <div className="row">
-            <label htmlFor="doctorsBase">Doctores API</label>
-            <input id="doctorsBase" value={doctors.base} onChange={(e) => doctors.setBase(e.target.value)} placeholder="https://doctors-..." />
-            <button className="secondary" onClick={doctors.load} disabled={doctors.busy}>Cargar</button>
-          </div>
+        <div className="api-config">
+          <label htmlFor="apiBase">API Base</label>
+          <input
+            id="apiBase"
+            value={apiBase}
+            onChange={(e) => setApiBaseState(e.target.value)}
+            placeholder="/"
+          />
+
+          <label htmlFor="patientsBase" style={{ marginLeft: 12 }}>Pacientes API</label>
+          <input
+            id="patientsBase"
+            value={patients.base}
+            onChange={(e) => patients.setBase(e.target.value)}
+            placeholder="https://patients-..."
+            title="URL base de Pacientes (termina en /)"
+          />
+          <button className="secondary" onClick={patients.load} disabled={patients.busy}>
+            Cargar
+          </button>
+
+          <label htmlFor="doctorsBase" style={{ marginLeft: 12 }}>Doctores API</label>
+          <input
+            id="doctorsBase"
+            value={doctors.base}
+            onChange={(e) => doctors.setBase(e.target.value)}
+            placeholder="https://doctors-..."
+            title="URL base de Doctores (termina en /)"
+          />
+          <button className="secondary" onClick={doctors.load} disabled={doctors.busy}>
+            Cargar
+          </button>
+
           <button
+            style={{ marginLeft: 12 }}
             onClick={() => {
               try {
-                const u1 = new URL(apiBase, window.location.origin);
-                const u2 = new URL(patients.base, window.location.origin);
-                const u3 = new URL(doctors.base, window.location.origin);
-                if (![u1, u2, u3].every((u) => u.protocol.startsWith("http"))) throw new Error();
+                // valida URLs y persiste
+                new URL(apiBase, window.location.origin);
+                new URL(patients.base, window.location.origin);
+                new URL(doctors.base, window.location.origin);
                 setApiBase(apiBase);
                 setPatientsBase(patients.base);
                 setDoctorsBase(doctors.base);
@@ -245,7 +285,7 @@ export default function App() {
       </header>
 
       <main>
-        {/* ================= Registrar medicamento ================= */}
+        {/* ===== Registrar medicamento ===== */}
         <section className="card">
           <h2>Registrar medicamento</h2>
           <form className="grid-form" onSubmit={createMedicine}>
@@ -273,7 +313,7 @@ export default function App() {
           </form>
         </section>
 
-        {/* ================= Inventario ================= */}
+        {/* ===== Inventario ===== */}
         <section className="card">
           <div className="list-header">
             <h2>Inventario</h2>
@@ -311,27 +351,35 @@ export default function App() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7}><div className="empty-state">Sin medicamentos.</div></td>
+                  <td colSpan={7}>
+                    <div className="empty-state">Sin medicamentos.</div>
+                  </td>
                 </tr>
               ) : (
                 filtered.map((m) => (
                   <tr key={m.id ?? m._id}>
                     <td className="mono">{fmtId(m)}</td>
-                    <td>
-                      <div className="cell-title">{m.nombre}</div>
-                    </td>
+                    <td><div className="cell-title">{m.nombre}</div></td>
                     <td className="mono">{m.sku}</td>
                     <td>{money(m.precio)}</td>
                     <td>{m.unidad || "—"}</td>
                     <td className="mono">{m.stock}</td>
                     <td className="row-actions">
-                      <button className="secondary" onClick={() => quickAdjust(m, +1)}>+/-</button>
-                      <button className="secondary" onClick={() => quickAdjust(m, +1)}>Aplicar</button>
-                      <button className="secondary" onClick={() => quickAdjust(m, -1)}>Editar</button>
-                      <button className="danger" onClick={async () => {
-                        if (!confirm(`Eliminar ${m.nombre}?`)) return;
-                        try { await meds.remove(m.id); } catch (e) { alert("Error: " + e.message); }
-                      }}>Eliminar</button>
+                      <button className="secondary" onClick={() => quickAdjust(m, +1)}>+1</button>
+                      <button className="secondary" onClick={() => quickAdjust(m, -1)}>-1</button>
+                      <button
+                        className="danger"
+                        onClick={async () => {
+                          if (!confirm(`Eliminar ${m.nombre}?`)) return;
+                          try {
+                            await meds.remove(m.id);
+                          } catch (e) {
+                            alert("Error: " + e.message);
+                          }
+                        }}
+                      >
+                        Eliminar
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -340,12 +388,12 @@ export default function App() {
           </table>
         </section>
 
-        {/* ================= Crear receta ================= */}
+        {/* ===== Crear receta ===== */}
         <section className="card">
           <h2>Crear receta</h2>
-          <form className="grid-form" onSubmit={createRecipe}>
+          <form className="grid-form" onSubmit={createPrescription}>
             <div className="form-row">
-              <label>Paciente ID</label>
+              <label>Paciente</label>
               <div className="pretty-select">
                 <select value={rForm.paciente_id} onChange={setR("paciente_id")}>
                   <option value="">{patients.busy ? "Cargando..." : "Seleccione un paciente"}</option>
@@ -358,7 +406,7 @@ export default function App() {
             </div>
 
             <div className="form-row">
-              <label>Médico ID</label>
+              <label>Médico</label>
               <div className="pretty-select">
                 <select value={rForm.medico_id} onChange={setR("medico_id")}>
                   <option value="">{doctors.busy ? "Cargando..." : "Seleccione un médico"}</option>
@@ -373,10 +421,13 @@ export default function App() {
             <div className="form-row">
               <label>Medicamento</label>
               <div className="pretty-select">
-                <select value={rForm.item_medicamento_id} onChange={setR("item_medicamento_id")}>
+                <select
+                  value={rForm.item_medicina_id}
+                  onChange={setR("item_medicina_id")}
+                >
                   <option value="">(seleccione)</option>
                   {meds.items.map((m) => (
-                    <option key={m.id ?? m._id} value={m.id}>
+                    <option key={m._id ?? m.id} value={m._id}>
                       {m.nombre} — stock {m.stock}
                     </option>
                   ))}
@@ -413,13 +464,15 @@ export default function App() {
                 </thead>
                 <tbody>
                   {itemsReceta.map((it) => {
-                    const med = meds.items.find((m) => m.id === it.medicamento_id);
+                    const med = meds.items.find((m) => String(m._id) === String(it.medicina_id));
                     return (
-                      <tr key={it.medicamento_id}>
-                        <td>{med ? med.nombre : `#${it.medicamento_id}`}</td>
+                      <tr key={it.medicina_id}>
+                        <td>{med ? med.nombre : `#${it.medicina_id}`}</td>
                         <td className="mono">{it.cantidad}</td>
                         <td className="row-actions">
-                          <button className="danger" onClick={() => removeItem(it.medicamento_id)}>Eliminar</button>
+                          <button className="danger" onClick={() => removeItem(it.medicina_id)}>
+                            Eliminar
+                          </button>
                         </td>
                       </tr>
                     );
@@ -431,7 +484,9 @@ export default function App() {
         </section>
       </main>
 
-      <footer><small>pharmacy-react · conectado a pharmacy-api</small></footer>
+      <footer>
+        <small>pharmacy-react · conectado a pharmacy-api</small>
+      </footer>
     </div>
   );
 }
