@@ -168,7 +168,3 @@ curl -X POST http://localhost:4004/prescriptions \
 - **CORS**: no aplica (API y SPA comparten origen). Si separas dominios, habilita `cors` en Express y define `origin`.
 
 ---
-
-## 8) Licencia
-
-Este proyecto es de uso educativo. Ajusta la licencia según tu necesidad.
