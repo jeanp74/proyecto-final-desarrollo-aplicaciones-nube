@@ -25,21 +25,21 @@ jobs:
           # ACR primario
           - service: appointments-api
             context: appointments-api
-            image: appointments-api-frontend
+            image: appointments-api
             registry: primary
           - service: doctors-api
             context: doctors-api
-            image: doctors-api-frontend
+            image: doctors-api
             registry: primary
 
           # ACR secundario
           - service: patients-api
             context: patients-api
-            image: patients-api-frontend
+            image: patients-api
             registry: secondary
           - service: pharmacy-api
             context: pharmacy-api
-            image: pharmacy-api-frontend
+            image: pharmacy-api
             registry: secondary
 
     steps:
@@ -79,7 +79,7 @@ jobs:
         run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       # === Build & Push con docker CLI (como tu ejemplo que ya funciona) ===
-      - name: 🏗️ Build & Push ${{ matrix.service }} (frontend)
+      - name: 🏗️ Build & Push ${{ matrix.service }}
         run: |
           docker build -t ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:latest ${{ matrix.context }}
           docker tag  ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:latest ${{ steps.select-acr.outputs.LOGIN_SERVER }}/${{ matrix.image }}:${{ steps.vars.outputs.TAG }}
