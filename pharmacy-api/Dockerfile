@@ -1,30 +1,18 @@
-# -------- FRONTEND BUILD (Vite) --------
-FROM node:20-alpine AS webbuild
-WORKDIR /web
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ .
-# Como front y API estarán en el mismo dominio, base "/"
-ARG VITE_API_BASE=/
-ENV VITE_API_BASE=${VITE_API_BASE}
+# --- Build stage ---
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
+RUN npm ci || npm install
+COPY . .
+# VITE_API_BASE can be overridden at build time
+# ARG VITE_API_BASE=http://localhost:4003
+ARG VITE_API_BASE
+ENV VITE_API_BASE=$VITE_API_BASE
 RUN npm run build
 
-# -------- BACKEND (Express) --------
-FROM node:20-alpine
-WORKDIR /app
-# instala deps del backend
-COPY package*.json ./
-RUN npm ci --omit=dev
-# copia código backend
-COPY . .
-# copia el build del front -> /app/public (lo sirve Express)
-COPY --from=webbuild /web/dist ./public
-
-ENV NODE_ENV=production
-ENV PORT=4003
-EXPOSE 4003
-# ENV PORT=4002 SERVICE_NAME=products-api
-# ENV SERVICE_NAME=products-api
-
-# Tu start ya apunta a src/app.js
-CMD ["node","src/app.js"]
+# --- Run stage ---
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
