@@ -1,14 +1,3 @@
-# -------- FRONTEND BUILD (Vite) --------
-FROM node:20-alpine AS webbuild
-WORKDIR /web
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ .
-# Como front y API estarán en el mismo dominio, base "/"
-ARG VITE_API_BASE=/
-ENV VITE_API_BASE=${VITE_API_BASE}
-RUN npm run build
-
 # -------- BACKEND (Express) --------
 FROM node:20-alpine
 WORKDIR /app

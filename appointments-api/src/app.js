@@ -1,11 +1,6 @@
 import express from "express";
 import cors from "cors";
 import { pool } from "./db.js";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
@@ -34,7 +29,7 @@ app.get("/db/health", async (_req, res) => {
 });
 
 // Doc rápida
-app.get("/api", (_req, res) => {
+app.get("/", (_req, res) => {
   res.json({
     GET: {
       "/appointments": "Listar (filtros: ?paciente_id=&medico_id=&estado=&from=&to=)",
@@ -181,10 +176,5 @@ app.put("/tables", async (_req, res) => {
     res.status(500).json({ error: "Error reseteando tabla", detail: String(e) });
   }
 });
-
-/* ===== STATIC + SPA FALLBACK ===== */
-const publicDir = path.join(__dirname, "../public");
-app.use(express.static(publicDir));
-app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
 app.listen(PORT, () => console.log(`✅ ${SERVICE} en http://localhost:${PORT}`));
