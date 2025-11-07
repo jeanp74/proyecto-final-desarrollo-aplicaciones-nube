@@ -17,7 +17,7 @@ await connectMongo();
 const COLL = process.env.PRODUCTS_COLLECTION || "products";
 const discriminatorKey = "__kind";
 const KIND_MED = "pharmacy_medicamentos";
-const KIND_RX  = "pharmacy_recetas";
+const KIND_RX = "pharmacy_recetas";
 const KIND_COUNTER = "pharmacy_counter";
 
 const BaseSchema = new mongoose.Schema(
@@ -31,10 +31,10 @@ const Medicine = Item.discriminator(
   KIND_MED,
   new mongoose.Schema(
     {
-      id:     { type: Number, required: true },
+      id: { type: Number, required: true },
       nombre: { type: String, required: true, trim: true },
-      sku:    { type: String, trim: true },
-      stock:  { type: Number, required: true, min: 0 },
+      sku: { type: String, trim: true },
+      stock: { type: Number, required: true, min: 0 },
       precio: { type: Number, default: 0, min: 0 },
       unidad: { type: String, trim: true, default: "und" },
     },
@@ -47,12 +47,14 @@ const Prescription = Item.discriminator(
   KIND_RX,
   new mongoose.Schema(
     {
-      id:          { type: Number, required: true },
+      id: { type: Number, required: true },
       paciente_id: { type: Number, required: true },
-      medico_id:   { type: Number, required: true },
+      medico_id: { type: Number, required: true },
       items: [
-        { medicina_id: { type: mongoose.Schema.Types.ObjectId, required: true },
-          cantidad:    { type: Number, required: true, min: 1 } },
+        {
+          medicina_id: { type: mongoose.Schema.Types.ObjectId, required: true },
+          cantidad: { type: Number, required: true, min: 1 }
+        },
       ],
       notas: { type: String, trim: true },
       fecha: { type: Date, default: Date.now },
@@ -101,6 +103,8 @@ app.get("/", (_req, res) =>
       "/medicines/:id": "Obtener medicamento por _id o id numérico",
       "/prescriptions": "Listar recetas (filtros ?paciente_id=&medico_id=)",
       "/prescriptions/:id": "Obtener receta por _id o id numérico",
+      "/health": "Salud del servicio",
+      "/db/health": "Salud de la base de datos"
     },
     POST: {
       "/medicines": "Crear medicamento",
@@ -196,7 +200,7 @@ app.get("/prescriptions", async (req, res) => {
   try {
     const q = {};
     if (req.query.paciente_id) q.paciente_id = Number(req.query.paciente_id);
-    if (req.query.medico_id)   q.medico_id   = Number(req.query.medico_id);
+    if (req.query.medico_id) q.medico_id = Number(req.query.medico_id);
     const items = await Prescription.find(q).sort({ id: -1 }).lean();
     res.json(items);
   } catch (e) { res.status(500).json({ error: "Error listando recetas", detail: String(e) }); }
@@ -221,7 +225,7 @@ app.post("/prescriptions", async (req, res) => {
 
     // Validar medicinas y stock
     const ids = items.map((it) => it.medicina_id);
-    if (!ids.every((x)=>mongoose.isValidObjectId(x))) return res.status(400).json({ error: "Algún medicina_id es inválido" });
+    if (!ids.every((x) => mongoose.isValidObjectId(x))) return res.status(400).json({ error: "Algún medicina_id es inválido" });
 
     const meds = await Medicine.find({ _id: { $in: ids } }).select({ _id: 1, stock: 1, nombre: 1 }).lean();
     const byId = new Map(meds.map((m) => [String(m._id), m]));
