@@ -4,4 +4,4 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 EXPOSE 5000
-CMD ["node", "src/service.js"]
+CMD ["node", "src/app.js"]
