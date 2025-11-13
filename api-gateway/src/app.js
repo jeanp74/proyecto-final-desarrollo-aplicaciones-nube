@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import authRoutes from "./auth/auth.routes.js";
+import authRouter from "./auth/auth.controller.js";
 import gatewayRoutes from "./gateway/gateway.routes.js";
 
 dotenv.config();
@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 // Rutas principales
-app.use("/auth", authRoutes);
+app.use("/auth", authRouter);
 app.use("/api", gatewayRoutes);
 
 app.get("/", (_, res) => res.json({ status: "API Gateway + Auth activo" }));

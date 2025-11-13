@@ -1,13 +1,10 @@
 // api-gateway/src/auth/auth.controller.js
-import express from "express";
-import cors from "cors";
+import { Router } from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { demoUsers, refreshStore } from "./auth.service.js";
 
-const router = express();
-router.use(cors());
-router.use(express.json());
+const router = Router();
 
 // === Configuración de JWT ===
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
@@ -28,7 +25,6 @@ function signRefreshToken(user) {
 }
 
 // === RUTA: Login de usuario ===
-// (Simula autenticación real)
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   const user = demoUsers.find(u => u.email === email);
