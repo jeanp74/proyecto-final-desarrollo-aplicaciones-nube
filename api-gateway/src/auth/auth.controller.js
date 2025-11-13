@@ -25,18 +25,13 @@ function signRefreshToken(user) {
 }
 
 // === RUTA: Login de usuario ===
-// Usuario estático para pruebas: admin@example.com / admin
+// (Simula autenticación real)
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-
   const user = demoUsers.find(u => u.email === email);
-  if (!user) {
-    return res.status(401).json({ success: false, error: "Usuario no encontrado" });
-  }
 
-  const passwordMatch = await bcrypt.compare(password, user.password);
-  if (!passwordMatch) {
-    return res.status(401).json({ success: false, error: "Contraseña incorrecta" });
+  if (!user || !(await bcrypt.compare(password, user.password))) {
+    return res.status(401).json({ error: "Credenciales inválidas" });
   }
 
   const accessToken = signAccessToken(user);
@@ -45,7 +40,6 @@ router.post("/login", async (req, res) => {
 
   res.json({
     success: true,
-    message: "Inicio de sesión exitoso",
     access_token: accessToken,
     refresh_token: refreshToken,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
@@ -82,7 +76,7 @@ router.post("/refresh", (req, res) => {
 router.post("/logout", (req, res) => {
   const { refresh_token } = req.body;
   if (refresh_token) refreshStore.delete(refresh_token);
-  res.json({ ok: true, message: "Sesión cerrada correctamente" });
+  res.json({ ok: true });
 });
 
 export default router;
