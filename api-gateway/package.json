@@ -2,9 +2,9 @@
   "name": "gateway-auth-service",
   "version": "1.0.0",
   "type": "module",
-  "main": "src/app.js",
+  "main": "src/service.js",
   "scripts": {
-    "start": "node src/app.js"
+    "start": "node src/service.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
