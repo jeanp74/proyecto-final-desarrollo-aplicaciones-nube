@@ -18,20 +18,39 @@ function signRefreshToken(user) {
   return jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: REFRESH_EXP });
 }
 
-export async function login(req, res) {
+// api-gateway/auth/auth.controller.js
+import { Router } from "express";
+import jwt from "jsonwebtoken";
+
+const router = Router();
+
+// Demo: usuario estático para pruebas
+const USER = {
+  email: "admin@example.com",
+  password: "admin",
+  name: "Administrador",
+  role: "admin",
+};
+
+router.post("/login", (req, res) => {
   const { email, password } = req.body;
-  const user = demoUsers.find(u => u.email === email);
-  if (!user) return res.status(401).json({ error: "Credenciales inválidas" });
+  if (email !== USER.email || password !== USER.password) {
+    return res.status(401).json({ success: false, error: "Credenciales inválidas" });
+  }
 
-  const match = await bcrypt.compare(password, user.passwordHash);
-  if (!match) return res.status(401).json({ error: "Credenciales inválidas" });
+  const token = jwt.sign({ email, role: USER.role }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || "1h",
+  });
 
-  const access = signAccessToken(user);
-  const refresh = signRefreshToken(user);
-  refreshStore.set(refresh, { userId: user.id, createdAt: Date.now() });
+  res.json({
+    success: true,
+    token,
+    user: { email: USER.email, name: USER.name, role: USER.role },
+  });
+});
 
-  res.json({ access_token: access, refresh_token: refresh, token_type: "Bearer" });
-}
+export default router;
+
 
 export function refresh(req, res) {
   const { refresh_token } = req.body;
