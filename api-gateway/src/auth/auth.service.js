@@ -1,18 +1,26 @@
+// api-gateway/src/auth/auth.service.js
+import bcrypt from "bcrypt";
+
+// === Usuarios de prueba (mock) ===
+// Contraseña: "admin"
+const hashedPassword = await bcrypt.hash("admin", 10);
+
 export const demoUsers = [
   {
-    id: "u1",
-    name: "Dr. Juan",
-    email: "juan@saludvital.com",
-    role: "doctor",
-    passwordHash: "$2b$10$CwTycUXWue0Thq9StjUM0u" // cambia por hash real
+    id: 1,
+    name: "Administrador",
+    email: "admin@example.com",
+    password: hashedPassword,
+    role: "admin",
   },
   {
-    id: "u2",
-    name: "Paciente Ana",
-    email: "ana@correo.com",
-    role: "patient",
-    passwordHash: "$2b$10$7QmH0...."
-  }
+    id: 2,
+    name: "Usuario Prueba",
+    email: "user@example.com",
+    password: await bcrypt.hash("user123", 10),
+    role: "user",
+  },
 ];
 
+// === Almacenamiento temporal de tokens de refresh ===
 export const refreshStore = new Map();
