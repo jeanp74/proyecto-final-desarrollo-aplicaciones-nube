@@ -1,11 +1,17 @@
-import bcrypt from "bcrypt";
+// api-gateway/src/auth/auth.controller.js
+import { Router } from "express";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
 import { demoUsers, refreshStore } from "./auth.service.js";
 
+const router = Router();
+
+// === Configuración de JWT ===
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const JWT_EXP = process.env.JWT_EXP || "15m";
 const REFRESH_EXP = process.env.REFRESH_EXP || "7d";
 
+// === Funciones internas ===
 function signAccessToken(user) {
   return jwt.sign(
     { sub: user.id, name: user.name, email: user.email, role: user.role },
@@ -18,59 +24,65 @@ function signRefreshToken(user) {
   return jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: REFRESH_EXP });
 }
 
-// api-gateway/auth/auth.controller.js
-import { Router } from "express";
-import jwt from "jsonwebtoken";
-
-const router = Router();
-
-// Demo: usuario estático para pruebas
-const USER = {
-  email: "admin@example.com",
-  password: "admin",
-  name: "Administrador",
-  role: "admin",
-};
-
-router.post("/login", (req, res) => {
+// === RUTA: Login de usuario ===
+// Usuario estático para pruebas: admin@example.com / admin
+router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  if (email !== USER.email || password !== USER.password) {
-    return res.status(401).json({ success: false, error: "Credenciales inválidas" });
+
+  const user = demoUsers.find(u => u.email === email);
+  if (!user) {
+    return res.status(401).json({ success: false, error: "Usuario no encontrado" });
   }
 
-  const token = jwt.sign({ email, role: USER.role }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || "1h",
-  });
+  const passwordMatch = await bcrypt.compare(password, user.password);
+  if (!passwordMatch) {
+    return res.status(401).json({ success: false, error: "Contraseña incorrecta" });
+  }
+
+  const accessToken = signAccessToken(user);
+  const refreshToken = signRefreshToken(user);
+  refreshStore.set(refreshToken, { userId: user.id, createdAt: Date.now() });
 
   res.json({
     success: true,
-    token,
-    user: { email: USER.email, name: USER.name, role: USER.role },
+    message: "Inicio de sesión exitoso",
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
 
-export default router;
-
-
-export function refresh(req, res) {
+// === RUTA: Refrescar token ===
+router.post("/refresh", (req, res) => {
   const { refresh_token } = req.body;
-  if (!refresh_token || !refreshStore.has(refresh_token))
+  if (!refresh_token || !refreshStore.has(refresh_token)) {
     return res.status(401).json({ error: "Token inválido" });
+  }
 
-  const payload = jwt.verify(refresh_token, JWT_SECRET);
-  const user = demoUsers.find(u => u.id === payload.sub);
-  if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+  try {
+    const payload = jwt.verify(refresh_token, JWT_SECRET);
+    const user = demoUsers.find(u => u.id === payload.sub);
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
 
-  const newAccess = signAccessToken(user);
-  const newRefresh = signRefreshToken(user);
-  refreshStore.delete(refresh_token);
-  refreshStore.set(newRefresh, { userId: user.id, createdAt: Date.now() });
+    const newAccess = signAccessToken(user);
+    const newRefresh = signRefreshToken(user);
+    refreshStore.delete(refresh_token);
+    refreshStore.set(newRefresh, { userId: user.id, createdAt: Date.now() });
 
-  res.json({ access_token: newAccess, refresh_token: newRefresh });
-}
+    res.json({
+      access_token: newAccess,
+      refresh_token: newRefresh,
+    });
+  } catch (err) {
+    res.status(401).json({ error: "Token expirado o inválido" });
+  }
+});
 
-export function logout(req, res) {
+// === RUTA: Logout ===
+router.post("/logout", (req, res) => {
   const { refresh_token } = req.body;
   if (refresh_token) refreshStore.delete(refresh_token);
-  res.json({ ok: true });
-}
+  res.json({ ok: true, message: "Sesión cerrada correctamente" });
+});
+
+export default router;
