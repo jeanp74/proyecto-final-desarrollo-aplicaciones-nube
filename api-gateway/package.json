@@ -2,7 +2,7 @@
   "name": "gateway-auth-service",
   "version": "1.0.0",
   "type": "module",
-  "main": "src/app.js",
+  "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js"
   },
@@ -12,6 +12,6 @@
     "dotenv": "^16.4.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.0",
-    "node-fetch": "^3.4.1"
+    "node-fetch": "^3.3.2"
   }
 }
