@@ -1,10 +1,13 @@
 // api-gateway/src/auth/auth.controller.js
-import { Router } from "express";
+import express from "express";
+import cors from "cors";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { demoUsers, refreshStore } from "./auth.service.js";
 
-const router = Router();
+const router = express();
+router.use(cors());
+router.use(express.json());
 
 // === Configuración de JWT ===
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
